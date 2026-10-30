@@ -20,6 +20,8 @@ EVENT_FIELDS = ("machine", "start", "end", "state", "reason")
 PRODUCTION_FIELDS = (
     "machine", "date", "shift", "ideal_cycle_s", "good_parts", "scrap_parts",
 )
+MICRO_STOPS_AS = ("performance", "availability")
+UNLOGGED_TIME = ("loss", "exclude")
 
 
 class ConfigError(ValueError):
@@ -70,6 +72,11 @@ class Config:
     dayfirst: bool = False
     shifts: tuple[Shift, ...] = DEFAULT_SHIFTS
     micro_stop_min: float = 2.0
+    # Which OEE factor micro-stops reduce (see kpi module docstring).
+    micro_stops_as: str = "performance"
+    # Shift minutes with no event: an availability loss, or left out of
+    # planned production time.
+    unlogged_time: str = "loss"
 
     def shift(self, name: str) -> Shift:
         return next(s for s in self.shifts if s.name == name)
@@ -89,7 +96,12 @@ def load_config(path: str | Path | None) -> Config:
 def parse_config(raw: dict) -> Config:
     if not isinstance(raw, dict):
         raise ConfigError("mapping file must be a YAML mapping")
-    _check_keys(raw, {"events", "production", "shifts", "micro_stop_minutes"}, "top level")
+    _check_keys(
+        raw,
+        {"events", "production", "shifts", "micro_stop_minutes", "micro_stops_as",
+         "unlogged_time"},
+        "top level",
+    )
     events = raw.get("events") or {}
     production = raw.get("production") or {}
     _check_keys(
@@ -118,6 +130,11 @@ def parse_config(raw: dict) -> Config:
         if not isinstance(value, (int, float)) or value < 0:
             raise ConfigError("micro_stop_minutes must be a number >= 0")
         kwargs["micro_stop_min"] = float(value)
+    for key, allowed in [("micro_stops_as", MICRO_STOPS_AS), ("unlogged_time", UNLOGGED_TIME)]:
+        if key in raw:
+            if raw[key] not in allowed:
+                raise ConfigError(f"{key} must be one of: {', '.join(allowed)}")
+            kwargs[key] = raw[key]
     return Config(**kwargs)
 
 

@@ -36,3 +36,5 @@ shifts:                       # quote the times
   # C: {start: "22:00", end: "06:00"}   # a shift may end the next day
 
 micro_stop_minutes: 2         # unplanned stops shorter than this are micro-stops
+micro_stops_as: performance   # or: availability (which OEE factor they reduce)
+unlogged_time: loss           # or: exclude (shift minutes with no event logged)

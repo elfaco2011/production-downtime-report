@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from pdr.config import ConfigError, load_config, parse_config
+from pdr.config import Config, ConfigError, load_config, parse_config
 from pdr.io import UNSPECIFIED, InputError, load_dataset
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -196,3 +196,11 @@ def test_zero_length_events_are_dropped_and_reported():
     assert dataset.dropped_rows.to_dict("records") == [
         {"what": "events", "row": 3, "reason": "zero-length event"}
     ]
+
+
+def test_config_loss_options():
+    config = parse_config({"micro_stops_as": "availability", "unlogged_time": "exclude"})
+    assert (config.micro_stops_as, config.unlogged_time) == ("availability", "exclude")
+    assert Config().micro_stops_as == "performance"
+    with pytest.raises(ConfigError, match="micro_stops_as must be one of"):
+        parse_config({"micro_stops_as": "quality"})
