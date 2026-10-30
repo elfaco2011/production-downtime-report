@@ -15,6 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+app = ["streamlit>=1.40", "plotly>=5.20"]
 dev = ["pytest>=8"]
 
 [tool.setuptools.packages.find]
