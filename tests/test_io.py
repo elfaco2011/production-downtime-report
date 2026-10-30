@@ -91,6 +91,17 @@ def test_non_iso_dates_are_rejected_not_guessed():
     assert found[2].startswith("unknown value(s) in 'state'")
 
 
+def test_error_message_lists_problems_in_row_order():
+    with pytest.raises(InputError) as exc:
+        load_events(
+            HEADER
+            + "M1,2026-09-01 07:00,2026-09-01 06:50,STOP,x\n"
+            + "M1,bad,2026-09-01 08:00,RUN,\n"
+        )
+    lines = str(exc.value).splitlines()
+    assert lines[1].startswith("  - row 2:") and lines[2].startswith("  - row 3:")
+
+
 def test_dayfirst_option():
     config = parse_config({"events": {"dayfirst": True}})
     events = load_events(HEADER + "M1,01/09/2026 07:00,01/09/2026 08:00,RUN,\n", config)

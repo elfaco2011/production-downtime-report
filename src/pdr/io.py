@@ -37,11 +37,11 @@ class InputError(ValueError):
     def __init__(self, what: str, problems: list[str]):
         self.what = what
         self.problems = sorted(problems, key=_row_of)
-        listed = problems[:MAX_LISTED_PROBLEMS]
-        lines = [f"{what}: {len(problems)} problem(s) found"]
+        listed = self.problems[:MAX_LISTED_PROBLEMS]
+        lines = [f"{what}: {len(self.problems)} problem(s) found"]
         lines += [f"  - {p}" for p in listed]
-        if len(problems) > len(listed):
-            lines.append(f"  ... and {len(problems) - len(listed)} more")
+        if len(self.problems) > len(listed):
+            lines.append(f"  ... and {len(self.problems) - len(listed)} more")
         super().__init__("\n".join(lines))
 
 
