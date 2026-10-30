@@ -340,3 +340,19 @@ def test_sample_has_no_spurious_unlogged_time():
     a = sample()
     assert data_quality(a).unlogged_min == 0
     assert "Unlogged" not in set(pareto(a, "all_losses")["reason"])
+
+
+def test_downtime_by_hour_splits_at_hour_boundaries():
+    from pdr.kpi import downtime_by_hour
+
+    a = run(EVENTS_HEADER + """\
+M1,2026-09-01 06:00,2026-09-01 09:50,RUN,
+M1,2026-09-01 09:50,2026-09-01 10:20,STOP,robot fault
+M1,2026-09-01 10:20,2026-09-01 10:21,STOP,micro
+M1,2026-09-01 10:21,2026-09-01 14:00,RUN,
+""")
+    h = downtime_by_hour(a)
+    assert h.to_dict("records") == [
+        {"weekday": "Tuesday", "hour": 9, "minutes": 10.0},
+        {"weekday": "Tuesday", "hour": 10, "minutes": 20.0},
+    ]

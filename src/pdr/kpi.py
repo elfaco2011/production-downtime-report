@@ -468,3 +468,31 @@ def filter_analysis(
 def iso_week(dates: pd.Series) -> pd.Series:
     iso = dates.dt.isocalendar()
     return iso["year"].astype(str) + "-W" + iso["week"].astype(str).str.zfill(2)
+
+
+def downtime_by_hour(analysis: Analysis) -> pd.DataFrame:
+    """Unplanned stop minutes (micro-stops excluded) by weekday x hour of day.
+
+    Stops are cut at hour boundaries, so a stop from 09:50 to 10:20 adds
+    10 minutes to 09:00 and 20 minutes to 10:00.
+    """
+    s = analysis.segments
+    stops = s[(s["state"] == "STOP") & ~s["is_micro"]][["start", "end"]]
+    columns = ["weekday", "hour", "minutes"]
+    if stops.empty:
+        return pd.DataFrame(columns=columns)
+    first = stops["start"].dt.floor("h")
+    n_hours = ((stops["end"] - pd.Timedelta(microseconds=1)).dt.floor("h") - first)
+    n_hours = (n_hours / pd.Timedelta(hours=1)).astype(int) + 1
+    rep = stops.loc[stops.index.repeat(n_hours)].copy()
+    rep["hour_start"] = first.loc[rep.index] + pd.to_timedelta(
+        rep.groupby(level=0).cumcount(), unit="h"
+    )
+    rep = rep.reset_index(drop=True)
+    hour_end = rep["hour_start"] + pd.Timedelta(hours=1)
+    lo = rep["start"].where(rep["start"] > rep["hour_start"], rep["hour_start"])
+    hi = rep["end"].where(rep["end"] < hour_end, hour_end)
+    rep["minutes"] = (hi - lo) / MINUTE
+    rep["weekday"] = rep["hour_start"].dt.day_name()
+    rep["hour"] = rep["hour_start"].dt.hour
+    return rep.groupby(["weekday", "hour"], as_index=False)["minutes"].sum()[columns]
