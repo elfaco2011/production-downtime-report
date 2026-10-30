@@ -167,6 +167,14 @@ def _shifts(raw: dict) -> tuple[Shift, ...]:
         if not isinstance(spec, dict) or set(spec) != {"start", "end"}:
             raise ConfigError(f"shifts.{name}: expected keys 'start' and 'end'")
         shifts.append(Shift(str(name), _time(spec["start"], name), _time(spec["end"], name)))
+    # Overlapping shifts would count the same minutes twice.
+    day = 24 * 60
+    taken: dict[int, str] = {}
+    for s in shifts:
+        for m in range(s.start_min, s.start_min + s.duration_min):
+            if m % day in taken:
+                raise ConfigError(f"shifts {taken[m % day]} and {s.name} overlap")
+            taken[m % day] = s.name
     return tuple(shifts)
 
 

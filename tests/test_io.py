@@ -166,3 +166,11 @@ def test_config_shifts():
     })
     assert config.shift("N").duration_min == 480
     assert config.shift("D").duration_min == 960
+
+
+def test_config_rejects_overlapping_shifts():
+    with pytest.raises(ConfigError, match="shifts A and B overlap"):
+        parse_config({"shifts": {
+            "A": {"start": "06:00", "end": "14:00"},
+            "B": {"start": "13:00", "end": "22:00"},
+        }})
