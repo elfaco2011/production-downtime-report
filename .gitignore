@@ -1,0 +1,11 @@
+# Secrets
+.env
+credentials*.json
+*.key
+
+# Python
+__pycache__/
+.venv/
+
+# Generated files
+output/
