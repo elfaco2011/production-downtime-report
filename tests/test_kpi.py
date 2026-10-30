@@ -59,6 +59,12 @@ def one_shift():
     return run(ONE_SHIFT, ONE_SHIFT_PRODUCTION)
 
 
+def test_segments_cover_only_real_events(one_shift):
+    s = one_shift.segments
+    assert len(s) == 10  # one shift, no event crosses a boundary
+    assert s.notna().all().all()
+
+
 def test_hand_calculated_oee(one_shift):
     s = summary(one_shift)
     assert s["shift_min"] == 480

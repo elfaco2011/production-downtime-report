@@ -123,15 +123,13 @@ def split_by_shift(events: pd.DataFrame, config: Config) -> pd.DataFrame:
         seg_start = rep["start"].where(rep["start"] > lo, lo)
         seg_end = rep["end"].where(rep["end"] < hi, hi)
         keep = seg_end > seg_start
-        parts.append(
-            rep[keep].assign(
-                shift=shift.name,
-                event_start=rep["start"],
-                event_end=rep["end"],
-                start=seg_start[keep],
-                end=seg_end[keep],
-            )
-        )
+        part = rep[keep].copy()
+        part["shift"] = shift.name
+        part["event_start"] = part["start"]
+        part["event_end"] = part["end"]
+        part["start"] = seg_start[keep]
+        part["end"] = seg_end[keep]
+        parts.append(part)
     seg = pd.concat(parts).sort_values(["machine", "start"]).reset_index(drop=True)
 
     seg["minutes"] = (seg["end"] - seg["start"]) / MINUTE
