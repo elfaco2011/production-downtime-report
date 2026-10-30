@@ -123,7 +123,7 @@ def test_unmapped_state_values_are_listed():
     )
     assert len(found) == 1
     assert "'Allarme' (2 rows, first at row 3)" in found[0]
-    assert "'Marcia' (1 rows, first at row 2)" in found[0]
+    assert "'Marcia' (1 row, first at row 2)" in found[0]
     assert "events.state_values" in found[0]
 
 

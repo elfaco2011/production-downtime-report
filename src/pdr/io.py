@@ -337,7 +337,8 @@ def _unknown_states_message(labels: pd.Series, rows: pd.Series, column: str) -> 
     found = []
     for value, idx in labels.groupby(labels).groups.items():
         first = rows[idx].min()
-        found.append(f"'{value}' ({len(idx)} rows, first at row {first})")
+        rows_word = "row" if len(idx) == 1 else "rows"
+        found.append(f"'{value}' ({len(idx)} {rows_word}, first at row {first})")
     return (
         f"unknown value(s) in '{column}': {', '.join(found)}. "
         f"Each state must map to one of {', '.join(STATES)}; "
