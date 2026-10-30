@@ -29,6 +29,7 @@ from pdr.kpi import (
     stop_events,
     summary,
 )
+from pdr.report import build_weekly, render_excel, render_pdf, weeks
 
 SAMPLE = Path(__file__).parent / "data" / "sample"
 
@@ -230,6 +231,34 @@ def data_quality_section(a: Analysis) -> None:
             st.caption(note)
 
 
+def downloads_section(a: Analysis, source: str) -> None:
+    """Report downloads; files are generated in memory when clicked."""
+    st.subheader("Reports")
+    available = weeks(a)
+    c1, c2, c3 = st.columns([1, 1, 1])
+    week = c1.selectbox("Week for the PDF report", available, index=len(available) - 1)
+    c2.download_button(
+        "Download weekly PDF report",
+        data=lambda: render_pdf(build_weekly(a, week), source=source),
+        file_name=f"downtime_report_{week}.pdf",
+        mime="application/pdf",
+        icon=":material/picture_as_pdf:",
+        width="stretch",
+    )
+    c3.download_button(
+        "Download Excel (current filters)",
+        data=lambda: render_excel(a),
+        file_name="downtime_kpis.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        icon=":material/table_view:",
+        width="stretch",
+    )
+    st.caption(
+        "The PDF covers one ISO week of the selected machines and shifts and compares "
+        "it with the week before. The Excel file holds one sheet per KPI view."
+    )
+
+
 def sidebar_filters(a: Analysis) -> Analysis:
     st.sidebar.header("Filters")
     machines = sorted(a.shifts["machine"].unique())
@@ -288,6 +317,7 @@ def main() -> None:
         trend_section(view, colors)
     heatmap_section(view)
     stops_section(view)
+    downloads_section(view, source=inputs[0][1])
 
 
 main()

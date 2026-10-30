@@ -45,3 +45,10 @@ def test_filter_to_one_machine():
     machines.set_value(["IMM-02"]).run()
     assert not at.exception
     assert not at.error
+
+
+def test_download_buttons_present():
+    at = run_app()
+    assert not at.exception
+    labels = [b.proto.label for b in at.get("download_button")]
+    assert labels == ["Download weekly PDF report", "Download Excel (current filters)"]
