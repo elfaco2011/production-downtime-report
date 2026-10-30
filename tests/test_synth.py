@@ -47,8 +47,20 @@ def test_states_and_reasons(data):
     by_state = events.groupby("state")["reason"].unique()
     assert set(by_state["RUN"]) == {""}
     assert set(by_state["SETUP"]) == {"mold change"}
-    assert set(by_state["PLANNED"]) == {"preventive maintenance"}
+    assert set(by_state["PLANNED"]) == {"preventive maintenance", "break"}
     assert set(by_state["STOP"]) == set(synth.BASE_CAUSES)
+
+
+def test_one_break_per_shift_near_mid_shift(data):
+    events, production = data
+    breaks = events[events["reason"] == "break"]
+    assert len(breaks) == len(production)
+    assert ((breaks["end"] - breaks["start"]) == pd.Timedelta(minutes=30)).all()
+    shift_start = breaks["start"].dt.normalize() + pd.to_timedelta(
+        (breaks["start"].dt.hour >= 14) * 8 + 6, unit="h"
+    )
+    center = (breaks["start"] - shift_start) / pd.Timedelta(minutes=1) + 15
+    assert center.between(240 - 30, 240 + 30).all()
 
 
 def test_imm02_mold_temperature_story(data):

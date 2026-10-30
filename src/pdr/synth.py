@@ -82,9 +82,12 @@ BASE_SCRAP_RATE = 0.015
 SCRAP_PER_MOLD_TEMP_ALARM = 0.004
 
 MOLD_CHANGES_PER_WEEK = 2
-# Preventive maintenance every other week, Friday shift B, first 4 hours.
+# Preventive maintenance every other week, Friday shift B, first 3 hours.
 PM_WEEK_PARITY = {"IMM-01": 0, "IMM-02": 1, "IMM-03": 0}
-PM_DURATION_MIN = 240
+PM_DURATION_MIN = 180
+# One 30-minute break per shift, centered on mid-shift +/- 30 minutes.
+BREAK_MIN = 30
+BREAK_JITTER_MIN = 30
 
 
 def _causes_for(machine: str) -> dict[str, StopCause]:
@@ -181,12 +184,30 @@ def _planned_blocks(
     )
     if is_pm:
         blocks.append((0, PM_DURATION_MIN, "PLANNED", "preventive maintenance"))
+    center = SHIFT_MIN // 2 + int(rng.integers(-BREAK_JITTER_MIN, BREAK_JITTER_MIN + 1))
+    break_start = center - BREAK_MIN // 2
+    blocks.append((break_start, break_start + BREAK_MIN, "PLANNED", "break"))
     if (day, shift) in mold_change_slots:
         duration = int(np.clip(round(rng.lognormal(np.log(45), 0.3)), 20, 120))
-        earliest = PM_DURATION_MIN if is_pm else 30
-        offset = int(rng.integers(earliest, SHIFT_MIN - duration - 30))
-        blocks.append((offset, offset + duration, "SETUP", "mold change"))
-    return blocks
+        blocks.append(_place_block(rng, blocks, duration, "SETUP", "mold change"))
+    return sorted(blocks)
+
+
+def _place_block(
+    rng: np.random.Generator,
+    blocks: list[tuple[int, int, str, str]],
+    duration: int,
+    state: str,
+    reason: str,
+    margin: int = 30,
+) -> tuple[int, int, str, str]:
+    """Place a block at a random offset that does not touch existing blocks."""
+    for _ in range(1000):
+        start = int(rng.integers(margin, SHIFT_MIN - duration - margin))
+        end = start + duration
+        if all(end <= s or start >= e for s, e, *_ in blocks):
+            return (start, end, state, reason)
+    raise RuntimeError(f"no room for a {duration}-minute {reason} block")
 
 
 def generate(seed: int = SEED) -> tuple[pd.DataFrame, pd.DataFrame]:
