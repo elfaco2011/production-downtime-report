@@ -1,0 +1,101 @@
+import pandas as pd
+import pytest
+
+from pdr import synth
+
+
+@pytest.fixture(scope="module")
+def data():
+    return synth.generate()
+
+
+def test_reproducible(data):
+    events, production = synth.generate()
+    pd.testing.assert_frame_equal(events, data[0])
+    pd.testing.assert_frame_equal(production, data[1])
+
+
+def test_shapes(data):
+    events, production = data
+    assert list(events.columns) == synth.EVENT_COLUMNS
+    assert list(production.columns) == synth.PRODUCTION_COLUMNS
+    # 3 machines x 8 weeks x 5 days x 2 shifts
+    assert len(production) == 3 * 8 * 5 * 2
+    assert set(events["machine"]) == set(synth.MACHINES)
+
+
+def test_weekdays_only(data):
+    events, _ = data
+    assert (events["start"].dt.day_of_week < 5).all()
+
+
+def test_no_overlaps_and_within_shifts(data):
+    synth.validate_events(data[0])  # raises on failure
+
+
+def test_each_shift_fully_covered(data):
+    events, _ = data
+    minutes = (events["end"] - events["start"]).dt.total_seconds() / 60
+    per_shift = minutes.groupby(
+        [events["machine"], events["start"].dt.date, events["start"].dt.hour < 14]
+    ).sum()
+    assert (per_shift == synth.SHIFT_MIN).all()
+
+
+def test_states_and_reasons(data):
+    events, _ = data
+    by_state = events.groupby("state")["reason"].unique()
+    assert set(by_state["RUN"]) == {""}
+    assert set(by_state["SETUP"]) == {"mold change"}
+    assert set(by_state["PLANNED"]) == {"preventive maintenance"}
+    assert set(by_state["STOP"]) == set(synth.BASE_CAUSES)
+
+
+def test_imm02_mold_temperature_story(data):
+    events, _ = data
+    stops = events[events["state"] == "STOP"]
+    minutes = (stops["end"] - stops["start"]).dt.total_seconds()
+    share = (
+        minutes[stops["reason"] == "mold temperature alarm"]
+        .groupby(stops["machine"]).sum()
+        / minutes.groupby(stops["machine"]).sum()
+    )
+    assert share["IMM-02"] > 0.3
+    assert share["IMM-02"] > 2 * share.drop("IMM-02").max()
+
+
+def test_validate_rejects_overlap():
+    t = pd.Timestamp("2026-09-01 06:00")
+    bad = pd.DataFrame({
+        "machine": ["IMM-01", "IMM-01"],
+        "start": [t, t + pd.Timedelta(minutes=5)],
+        "end": [t + pd.Timedelta(minutes=10), t + pd.Timedelta(minutes=20)],
+        "state": ["RUN", "STOP"],
+        "reason": ["", "nozzle clog"],
+    })
+    with pytest.raises(ValueError, match="overlapping"):
+        synth.validate_events(bad)
+
+
+def test_validate_rejects_outside_shift():
+    t = pd.Timestamp("2026-09-01 22:30")
+    bad = pd.DataFrame({
+        "machine": ["IMM-01"],
+        "start": [t],
+        "end": [t + pd.Timedelta(minutes=10)],
+        "state": ["RUN"],
+        "reason": [""],
+    })
+    with pytest.raises(ValueError, match="outside shift"):
+        synth.validate_events(bad)
+
+
+def test_write_sample_roundtrip(tmp_path):
+    paths = synth.write_sample(tmp_path)
+    assert [p.name for p in paths] == [
+        "events.csv", "production.csv", "plant_export.xlsx",
+    ]
+    sheets = pd.read_excel(tmp_path / "plant_export.xlsx", sheet_name=None)
+    assert set(sheets) == {"Eventi", "Produzione"}
+    assert list(sheets["Eventi"].columns) == list(synth.XLSX_EVENT_COLUMNS.values())
+    assert len(sheets["Eventi"]) == len(pd.read_csv(tmp_path / "events.csv"))
