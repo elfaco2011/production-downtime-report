@@ -8,7 +8,9 @@ segments (RUN / STOP / SETUP / PLANNED) that exactly cover the shift.
 Unplanned stops arrive as a Poisson process; their durations are lognormal,
 which gives many short stops and a few long ones. A stop still running at
 shift end usually ends there, but some carry over into the next shift (or
-into the next morning), as happens in real logs. IMM-02 has a deliberately
+into the next morning), as happens in real logs. Short robot pick retries
+(20-110 s) are sprinkled inside run time as micro-stops, so timestamps
+have a resolution of one second. IMM-02 has a deliberately
 worse mold temperature alarm problem so the analysis has a story to tell.
 
 Usage:
@@ -85,11 +87,14 @@ MACHINE_CAUSE_OVERRIDES = {
 MAX_STOP_MIN = 240
 # Share of stops overrunning shift end that continue into the next shift.
 CARRY_OVER_PROBABILITY = 0.5
+MICRO_STOP_REASON = "part stuck / robot pick retry"
+MICRO_STOPS_PER_SHIFT = {"IMM-01": (10, 30), "IMM-02": (15, 40), "IMM-03": (10, 30)}
+MICRO_STOP_SECONDS = (20, 110)
 # Share of unplanned stops logged without a reason code by the operator.
 MISSING_REASON_SHARE = 0.05
 
 IDEAL_CYCLE_S = {"IMM-01": 24.0, "IMM-02": 30.0, "IMM-03": 18.0}
-PERFORMANCE_MEAN = {"IMM-01": 0.88, "IMM-02": 0.85, "IMM-03": 0.90}
+PERFORMANCE_MEAN = {"IMM-01": 0.92, "IMM-02": 0.89, "IMM-03": 0.94}
 BASE_SCRAP_RATE = 0.015
 SCRAP_PER_MOLD_TEMP_ALARM = 0.004
 
@@ -266,11 +271,12 @@ def generate(seed: int = SEED) -> tuple[pd.DataFrame, pd.DataFrame]:
             if carry:
                 machine_rows[-1][2] = t0 + timedelta(minutes=carry)
             segments, overrun = _shift_segments(rng, causes, blocks, carry)
+            segments = _insert_micro_stops(rng, machine, segments)
             for start, end, state, reason in segments:
                 machine_rows.append([
                     machine,
-                    t0 + timedelta(minutes=start),
-                    t0 + timedelta(minutes=end),
+                    t0 + timedelta(seconds=start),
+                    t0 + timedelta(seconds=end),
                     state,
                     reason,
                 ])
@@ -298,6 +304,45 @@ def generate(seed: int = SEED) -> tuple[pd.DataFrame, pd.DataFrame]:
     return events, production
 
 
+def _insert_micro_stops(
+    rng: np.random.Generator,
+    machine: str,
+    segments: list[tuple[int, int, str, str]],
+) -> list[tuple[int, int, str, str]]:
+    """Convert a shift timeline to seconds and add micro-stops inside RUN.
+
+    Micro-stops never touch a segment boundary, so they cannot merge with
+    another stop or cross a shift boundary.
+    """
+    seconds = [(s * 60, e * 60, state, reason) for s, e, state, reason in segments]
+    runs = [i for i, seg in enumerate(seconds) if seg[2] == "RUN"]
+    lengths = np.array([seconds[i][1] - seconds[i][0] for i in runs], dtype=float)
+    lo, hi = MICRO_STOPS_PER_SHIFT[machine]
+    placed: dict[int, list[tuple[int, int]]] = {i: [] for i in runs}
+    for _ in range(int(rng.integers(lo, hi + 1))):
+        duration = int(rng.integers(MICRO_STOP_SECONDS[0], MICRO_STOP_SECONDS[1] + 1))
+        for _ in range(100):
+            i = runs[rng.choice(len(runs), p=lengths / lengths.sum())]
+            seg_start, seg_end = seconds[i][:2]
+            if seg_end - seg_start < duration + 2:
+                continue
+            start = int(rng.integers(seg_start + 1, seg_end - duration))
+            end = start + duration
+            if all(end + 1 <= s or start >= e + 1 for s, e in placed[i]):
+                placed[i].append((start, end))
+                break
+
+    result = []
+    for i, (start, end, state, reason) in enumerate(seconds):
+        cursor = start
+        for s, e in sorted(placed.get(i, [])):
+            result.append((cursor, s, "RUN", ""))
+            result.append((s, e, "STOP", MICRO_STOP_REASON))
+            cursor = e
+        result.append((cursor, end, state, reason))
+    return result
+
+
 def _production_row(
     rng: np.random.Generator,
     machine: str,
@@ -305,7 +350,8 @@ def _production_row(
     shift: str,
     segments: list[tuple[int, int, str, str]],
 ) -> tuple:
-    run_s = 60 * sum(e - s for s, e, state, _ in segments if state == "RUN")
+    """Parts made in one shift; `segments` are in seconds."""
+    run_s = sum(e - s for s, e, state, _ in segments if state == "RUN")
     alarms = sum(1 for *_, r in segments if r == "mold temperature alarm")
     cycle = IDEAL_CYCLE_S[machine]
     performance = np.clip(rng.normal(PERFORMANCE_MEAN[machine], 0.03), 0.75, 0.98)
@@ -368,7 +414,7 @@ def write_sample(out_dir: Path, seed: int = SEED) -> list[Path]:
     production_csv = out_dir / "production.csv"
     xlsx = out_dir / "plant_export.xlsx"
 
-    events.to_csv(events_csv, index=False, date_format="%Y-%m-%d %H:%M")
+    events.to_csv(events_csv, index=False, date_format="%Y-%m-%d %H:%M:%S")
     production.to_csv(production_csv, index=False)
     with pd.ExcelWriter(xlsx, engine="openpyxl") as writer:
         events.assign(state=events["state"].map(XLSX_STATE_VALUES)).rename(

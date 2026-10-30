@@ -54,7 +54,7 @@ def test_each_shift_fully_covered(data):
         "minutes"
     ].sum()
     assert len(per_shift) == 3 * 8 * 5 * 2
-    assert (per_shift == synth.SHIFT_MIN).all()
+    assert per_shift.to_numpy() == pytest.approx(synth.SHIFT_MIN)
 
 
 def test_some_long_stops_carry_over(data):
@@ -80,7 +80,30 @@ def test_states_and_reasons(data):
     assert set(by_state["RUN"]) == {""}
     assert set(by_state["SETUP"]) == {"mold change"}
     assert set(by_state["PLANNED"]) == {"preventive maintenance", "break"}
-    assert set(by_state["STOP"]) == set(synth.BASE_CAUSES) | {""}
+    assert set(by_state["STOP"]) == (
+        set(synth.BASE_CAUSES) | {synth.MICRO_STOP_REASON, ""}
+    )
+
+
+def test_micro_stops_per_shift(monkeypatch):
+    monkeypatch.setattr(synth, "MISSING_REASON_SHARE", 0.0)
+    events, _ = synth.generate()
+    micro = events[events["reason"] == synth.MICRO_STOP_REASON]
+    seconds = (micro["end"] - micro["start"]).dt.total_seconds()
+    assert seconds.between(20, 110).all()
+    per_shift = micro.groupby(
+        [micro["machine"], micro["start"].dt.date, micro["start"].dt.hour < 14]
+    ).size()
+    for machine, (lo, hi) in synth.MICRO_STOPS_PER_SHIFT.items():
+        counts = per_shift[machine]
+        assert len(counts) == 8 * 5 * 2
+        assert counts.between(lo, hi).all()
+    assert per_shift["IMM-02"].mean() > per_shift["IMM-01"].mean()
+
+
+def test_timestamps_have_second_resolution(data):
+    events, _ = data
+    assert (events["start"].dt.second != 0).any()
 
 
 def test_some_stops_without_reason(data):
