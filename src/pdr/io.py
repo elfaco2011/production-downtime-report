@@ -51,6 +51,10 @@ class Dataset:
     production: pd.DataFrame | None
     config: Config
     notes: list[str] = field(default_factory=list)
+    # Rows skipped by the loader: columns what, row, reason.
+    dropped_rows: pd.DataFrame = field(
+        default_factory=lambda: pd.DataFrame(columns=["what", "row", "reason"])
+    )
 
 
 def load_dataset(
@@ -65,6 +69,7 @@ def load_dataset(
     """
     config = config or Config()
     notes: list[str] = []
+    dropped: list[pd.DataFrame] = []
 
     if _is_excel(events_source):
         sheets = _read_workbook(events_source)
@@ -92,7 +97,7 @@ def load_dataset(
         else:
             production_raw, production_what = _read_csv(production_source), "production"
 
-    events = parse_events(events_raw, config, events_what, notes)
+    events = parse_events(events_raw, config, events_what, dropped)
     production = None
     if production_raw is not None:
         production = parse_production(production_raw, config, production_what)
@@ -100,14 +105,19 @@ def load_dataset(
         notes.append(
             "No production data: Performance, Quality and OEE are not available."
         )
-    return Dataset(events, production, config, notes)
+    dropped_rows = (
+        pd.concat(dropped, ignore_index=True)
+        if dropped
+        else pd.DataFrame(columns=["what", "row", "reason"])
+    )
+    return Dataset(events, production, config, notes, dropped_rows)
 
 
 def parse_events(
     raw: pd.DataFrame,
     config: Config,
     what: str = "events",
-    notes: list[str] | None = None,
+    dropped: list[pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
     df = _select_columns(raw, config.event_columns, EVENT_FIELDS, what)
     rows = _row_numbers(df)
@@ -151,8 +161,10 @@ def parse_events(
     })
 
     zero = events["end"] == events["start"]
-    if zero.any() and notes is not None:
-        notes.append(f"{zero.sum()} zero-length event(s) ignored.")
+    if zero.any() and dropped is not None:
+        dropped.append(pd.DataFrame({
+            "what": what, "row": events.loc[zero, "row"], "reason": "zero-length event",
+        }))
     events = events[~zero].sort_values(["machine", "start"]).reset_index(drop=True)
 
     overlaps = _overlap_problems(events)

@@ -174,3 +174,25 @@ def test_config_rejects_overlapping_shifts():
             "A": {"start": "06:00", "end": "14:00"},
             "B": {"start": "13:00", "end": "22:00"},
         }})
+
+
+def test_minutes_and_seconds_timestamps():
+    events = load_events(
+        HEADER
+        + "M1,2026-09-01 06:00,2026-09-01 06:00:45,RUN,\n"
+        + "M1,2026-09-01 06:00:45,2026-09-01 06:02,STOP,x\n"
+    )
+    assert events.at[0, "end"] == pd.Timestamp("2026-09-01 06:00:45")
+    assert events.at[1, "end"] == pd.Timestamp("2026-09-01 06:02:00")
+
+
+def test_zero_length_events_are_dropped_and_reported():
+    dataset = load_dataset(csv(
+        HEADER
+        + "M1,2026-09-01 06:00,2026-09-01 06:10,RUN,\n"
+        + "M1,2026-09-01 06:10,2026-09-01 06:10,STOP,x\n"
+    ))
+    assert len(dataset.events) == 1
+    assert dataset.dropped_rows.to_dict("records") == [
+        {"what": "events", "row": 3, "reason": "zero-length event"}
+    ]
