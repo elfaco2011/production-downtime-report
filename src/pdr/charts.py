@@ -152,5 +152,7 @@ def heatmap_chart(by_hour: pd.DataFrame) -> go.Figure:
         hovertemplate="%{y} %{x}<br>%{z:,.0f} min of stops<extra></extra>",
     ))
     fig.update_yaxes(autorange="reversed", showgrid=False)
-    fig.update_xaxes(title=dict(text="hour of day", font=dict(size=11)), tickangle=0)
+    fig.update_xaxes(
+        title=dict(text="hour of day", font=dict(size=11)), tickangle=0, type="category"
+    )
     return _layout(fig, height=340)
