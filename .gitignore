@@ -9,3 +9,5 @@ __pycache__/
 
 # Generated files
 output/
+*.egg-info/
+.pytest_cache/
