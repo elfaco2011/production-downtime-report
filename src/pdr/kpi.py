@@ -194,7 +194,10 @@ def shift_table(
     table = flags.groupby([s[k] for k in keys]).sum().reset_index()
     durations = {sh.name: sh.duration_min for sh in config.shifts}
     table["shift_min"] = table["shift"].map(durations).astype(float)
-    table["unlogged_min"] = (table["shift_min"] - table["logged_min"]).clip(lower=0)
+    # Rounded so that float noise from second timestamps is not reported.
+    table["unlogged_min"] = (
+        (table["shift_min"] - table["logged_min"]).round(6).clip(lower=0)
+    )
     table["week"] = iso_week(table["date"])
 
     micro_in_run = config.micro_stops_as == "performance"

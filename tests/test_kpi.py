@@ -334,3 +334,9 @@ def test_oee_identical_in_both_micro_stop_modes():
     assert perf["oee"].tolist() == pytest.approx(avail["oee"].tolist())
     assert (perf["availability"] > avail["availability"]).all()
     assert (perf["performance"] < avail["performance"]).all()
+
+
+def test_sample_has_no_spurious_unlogged_time():
+    a = sample()
+    assert data_quality(a).unlogged_min == 0
+    assert "Unlogged" not in set(pareto(a, "all_losses")["reason"])
