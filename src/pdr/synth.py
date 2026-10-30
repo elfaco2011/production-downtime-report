@@ -45,6 +45,12 @@ XLSX_EVENT_COLUMNS = {
     "state": "Stato",
     "reason": "Causa",
 }
+XLSX_STATE_VALUES = {
+    "RUN": "In marcia",
+    "STOP": "Fermo",
+    "SETUP": "Attrezzaggio",
+    "PLANNED": "Pianificato",
+}
 XLSX_PRODUCTION_COLUMNS = {
     "machine": "Macchina",
     "date": "Data",
@@ -350,7 +356,11 @@ def _shift_index(ts: pd.Series, closed: str) -> pd.Series:
 
 
 def write_sample(out_dir: Path, seed: int = SEED) -> list[Path]:
-    """Write events.csv, production.csv and a renamed-column XLSX export."""
+    """Write events.csv, production.csv and an XLSX export.
+
+    The XLSX uses Italian column names and state values, like an export
+    from a different plant system, to demonstrate the mapping file.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     events, production = generate(seed)
 
@@ -361,7 +371,9 @@ def write_sample(out_dir: Path, seed: int = SEED) -> list[Path]:
     events.to_csv(events_csv, index=False, date_format="%Y-%m-%d %H:%M")
     production.to_csv(production_csv, index=False)
     with pd.ExcelWriter(xlsx, engine="openpyxl") as writer:
-        events.rename(columns=XLSX_EVENT_COLUMNS).to_excel(
+        events.assign(state=events["state"].map(XLSX_STATE_VALUES)).rename(
+            columns=XLSX_EVENT_COLUMNS
+        ).to_excel(
             writer, sheet_name="Eventi", index=False
         )
         production.rename(columns=XLSX_PRODUCTION_COLUMNS).to_excel(

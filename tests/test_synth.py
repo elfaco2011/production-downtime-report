@@ -150,3 +150,4 @@ def test_write_sample_roundtrip(tmp_path):
     assert set(sheets) == {"Eventi", "Produzione"}
     assert list(sheets["Eventi"].columns) == list(synth.XLSX_EVENT_COLUMNS.values())
     assert len(sheets["Eventi"]) == len(pd.read_csv(tmp_path / "events.csv"))
+    assert set(sheets["Eventi"]["Stato"]) == set(synth.XLSX_STATE_VALUES.values())
