@@ -79,6 +79,8 @@ MACHINE_CAUSE_OVERRIDES = {
 MAX_STOP_MIN = 240
 # Share of stops overrunning shift end that continue into the next shift.
 CARRY_OVER_PROBABILITY = 0.5
+# Share of unplanned stops logged without a reason code by the operator.
+MISSING_REASON_SHARE = 0.05
 
 IDEAL_CYCLE_S = {"IMM-01": 24.0, "IMM-02": 30.0, "IMM-03": 18.0}
 PERFORMANCE_MEAN = {"IMM-01": 0.88, "IMM-02": 0.85, "IMM-03": 0.90}
@@ -279,6 +281,12 @@ def generate(seed: int = SEED) -> tuple[pd.DataFrame, pd.DataFrame]:
         event_rows += machine_rows
 
     events = pd.DataFrame(event_rows, columns=EVENT_COLUMNS)
+    # Operators sometimes skip the reason code; the true cause still drove
+    # the stop duration and scrap above.
+    missing = (events["state"] == "STOP") & (
+        rng.random(len(events)) < MISSING_REASON_SHARE
+    )
+    events.loc[missing, "reason"] = ""
     production = pd.DataFrame(production_rows, columns=PRODUCTION_COLUMNS)
     validate_events(events)
     return events, production

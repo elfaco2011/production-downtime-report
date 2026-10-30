@@ -80,7 +80,14 @@ def test_states_and_reasons(data):
     assert set(by_state["RUN"]) == {""}
     assert set(by_state["SETUP"]) == {"mold change"}
     assert set(by_state["PLANNED"]) == {"preventive maintenance", "break"}
-    assert set(by_state["STOP"]) == set(synth.BASE_CAUSES)
+    assert set(by_state["STOP"]) == set(synth.BASE_CAUSES) | {""}
+
+
+def test_some_stops_without_reason(data):
+    events, _ = data
+    stops = events[events["state"] == "STOP"]
+    share = (stops["reason"] == "").mean()
+    assert 0.03 <= share <= 0.07
 
 
 def test_one_break_per_shift_near_mid_shift(data):
