@@ -143,7 +143,7 @@ def heatmap_chart(by_hour: pd.DataFrame) -> go.Figure:
     )
     fig = go.Figure(go.Heatmap(
         z=grid.values,
-        x=[f"{h:02d}:00" for h in grid.columns],
+        x=[f"{h:02d}" for h in grid.columns],
         y=grid.index,
         colorscale=[[i / (len(SEQUENTIAL) - 1), c] for i, c in enumerate(SEQUENTIAL)],
         xgap=2,
@@ -152,4 +152,5 @@ def heatmap_chart(by_hour: pd.DataFrame) -> go.Figure:
         hovertemplate="%{y} %{x}<br>%{z:,.0f} min of stops<extra></extra>",
     ))
     fig.update_yaxes(autorange="reversed", showgrid=False)
-    return _layout(fig, height=300)
+    fig.update_xaxes(title=dict(text="hour of day", font=dict(size=11)), tickangle=0)
+    return _layout(fig, height=340)

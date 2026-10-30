@@ -310,12 +310,12 @@ def main() -> None:
 
     kpi_cards(view)
     data_quality_section(view)
+    pareto_section(view)
     left, right = st.columns(2)
     with left:
-        pareto_section(view)
-    with right:
         trend_section(view, colors)
-    heatmap_section(view)
+    with right:
+        heatmap_section(view)
     stops_section(view)
     downloads_section(view, source=inputs[0][1])
 
