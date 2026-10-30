@@ -6,7 +6,9 @@ a typical MES export, with a fixed seed so the output is reproducible.
 Event log model: every shift is split into contiguous, non-overlapping
 segments (RUN / STOP / SETUP / PLANNED) that exactly cover the shift.
 Unplanned stops arrive as a Poisson process; their durations are lognormal,
-which gives many short stops and a few long ones. IMM-02 has a deliberately
+which gives many short stops and a few long ones. A stop still running at
+shift end usually ends there, but some carry over into the next shift (or
+into the next morning), as happens in real logs. IMM-02 has a deliberately
 worse mold temperature alarm problem so the analysis has a story to tell.
 
 Usage:
@@ -75,6 +77,8 @@ MACHINE_CAUSE_OVERRIDES = {
     "IMM-02": {"mold temperature alarm": StopCause(1.8, 20, 0.7)},
 }
 MAX_STOP_MIN = 240
+# Share of stops overrunning shift end that continue into the next shift.
+CARRY_OVER_PROBABILITY = 0.5
 
 IDEAL_CYCLE_S = {"IMM-01": 24.0, "IMM-02": 30.0, "IMM-03": 18.0}
 PERFORMANCE_MEAN = {"IMM-01": 0.88, "IMM-02": 0.85, "IMM-03": 0.90}
@@ -106,14 +110,19 @@ def _fill_gap(
     causes: dict[str, StopCause],
     start: int,
     end: int,
-) -> list[tuple[int, int, str, str]]:
-    """Fill [start, end) minutes with alternating RUN and unplanned STOP."""
+) -> tuple[list[tuple[int, int, str, str]], int]:
+    """Fill [start, end) minutes with alternating RUN and unplanned STOP.
+
+    Returns the segments and the minutes by which the last stop overran
+    `end` (0 if it did not); the overrun part is not in the segments.
+    """
     names = list(causes)
     rates = np.array([causes[n].per_shift for n in names]) / SHIFT_MIN
     total_rate = rates.sum()
     probs = rates / total_rate
 
     segments = []
+    overrun = 0
     cursor = start
     while cursor < end:
         run = max(1, round(rng.exponential(1 / total_rate)))
@@ -123,27 +132,33 @@ def _fill_gap(
         if cursor >= end:
             break
         name = names[rng.choice(len(names), p=probs)]
-        # A stop still in progress at shift end is cut at the shift boundary.
-        stop_end = min(cursor + _stop_duration(rng, causes[name]), end)
-        segments.append((cursor, stop_end, "STOP", name))
+        stop_end = cursor + _stop_duration(rng, causes[name])
+        overrun = max(0, stop_end - end)
+        segments.append((cursor, min(stop_end, end), "STOP", name))
         cursor = stop_end
-    return segments
+    return segments, overrun
 
 
 def _shift_segments(
     rng: np.random.Generator,
     causes: dict[str, StopCause],
     planned_blocks: list[tuple[int, int, str, str]],
-) -> list[tuple[int, int, str, str]]:
-    """Build the full timeline of one shift, in minutes from shift start."""
+    start: int = 0,
+) -> tuple[list[tuple[int, int, str, str]], int]:
+    """Build the timeline of one shift from `start`, in minutes.
+
+    Returns the segments and the overrun of a stop still running at shift
+    end. Overruns into a planned block are dropped: the stop ends there.
+    """
     segments = []
-    cursor = 0
+    cursor = start
     for block in sorted(planned_blocks):
-        segments += _fill_gap(rng, causes, cursor, block[0])
+        gap, _ = _fill_gap(rng, causes, cursor, block[0])
+        segments += gap
         segments.append(block)
         cursor = block[1]
-    segments += _fill_gap(rng, causes, cursor, SHIFT_MIN)
-    return segments
+    gap, overrun = _fill_gap(rng, causes, cursor, SHIFT_MIN)
+    return segments + gap, overrun
 
 
 def _working_days() -> list[date]:
@@ -152,6 +167,18 @@ def _working_days() -> list[date]:
         for w in range(N_WEEKS)
         for d in range(5)
     ]
+
+
+def _shift_slots() -> list[tuple[date, str]]:
+    """All (day, shift) slots in chronological order."""
+    return [(day, shift) for day in _working_days() for shift in SHIFTS]
+
+
+def _can_carry_over(slot: tuple[date, str], next_slot: tuple[date, str] | None) -> bool:
+    """A stop may continue into the next slot, but not over a weekend."""
+    if next_slot is None:
+        return False
+    return (next_slot[0] - slot[0]).days <= 1
 
 
 def _mold_change_slots(rng: np.random.Generator) -> set[tuple[date, str]]:
@@ -216,25 +243,40 @@ def generate(seed: int = SEED) -> tuple[pd.DataFrame, pd.DataFrame]:
     event_rows = []
     production_rows = []
 
+    slots = _shift_slots()
     for machine in MACHINES:
         causes = _causes_for(machine)
         mold_change_slots = _mold_change_slots(rng)
-        for day in _working_days():
-            for shift, (shift_start, _) in SHIFTS.items():
-                t0 = datetime.combine(day, shift_start)
-                blocks = _planned_blocks(rng, machine, day, shift, mold_change_slots)
-                segments = _shift_segments(rng, causes, blocks)
-                for start, end, state, reason in segments:
-                    event_rows.append((
-                        machine,
-                        t0 + timedelta(minutes=start),
-                        t0 + timedelta(minutes=end),
-                        state,
-                        reason,
-                    ))
-                production_rows.append(
-                    _production_row(rng, machine, day, shift, segments)
-                )
+        machine_rows: list[list] = []
+        carry = 0  # minutes of the previous shift's last stop still to run
+        for i, (day, shift) in enumerate(slots):
+            t0 = datetime.combine(day, SHIFTS[shift][0])
+            blocks = _planned_blocks(rng, machine, day, shift, mold_change_slots)
+            # A carried-over stop extends the previous event and ends at the
+            # latest when the first planned block of this shift begins.
+            carry = min(carry, blocks[0][0])
+            if carry:
+                machine_rows[-1][2] = t0 + timedelta(minutes=carry)
+            segments, overrun = _shift_segments(rng, causes, blocks, carry)
+            for start, end, state, reason in segments:
+                machine_rows.append([
+                    machine,
+                    t0 + timedelta(minutes=start),
+                    t0 + timedelta(minutes=end),
+                    state,
+                    reason,
+                ])
+            production_rows.append(
+                _production_row(rng, machine, day, shift, segments)
+            )
+            next_slot = slots[i + 1] if i + 1 < len(slots) else None
+            carry_over = (
+                overrun > 0
+                and _can_carry_over((day, shift), next_slot)
+                and rng.random() < CARRY_OVER_PROBABILITY
+            )
+            carry = overrun if carry_over else 0
+        event_rows += machine_rows
 
     events = pd.DataFrame(event_rows, columns=EVENT_COLUMNS)
     production = pd.DataFrame(production_rows, columns=PRODUCTION_COLUMNS)
@@ -260,7 +302,11 @@ def _production_row(
 
 
 def validate_events(events: pd.DataFrame) -> None:
-    """Raise ValueError if events overlap per machine or fall outside shifts."""
+    """Raise ValueError if the generated event log is inconsistent.
+
+    Checks: no overlaps per machine, every event starts and ends inside a
+    shift window, and only unplanned stops may span more than one shift.
+    """
     for machine, group in events.groupby("machine"):
         g = group.sort_values("start")
         if (g["end"] <= g["start"]).any():
@@ -269,14 +315,30 @@ def validate_events(events: pd.DataFrame) -> None:
         if overlap.any():
             raise ValueError(f"{machine}: overlapping events")
 
-    in_any_shift = pd.Series(False, index=events.index)
-    for shift_start, shift_end in SHIFTS.values():
-        day = events["start"].dt.normalize()
+    start_shift = _shift_index(events["start"], closed="left")
+    end_shift = _shift_index(events["end"], closed="right")
+    outside = start_shift.isna() | end_shift.isna()
+    if outside.any():
+        raise ValueError(f"{outside.sum()} events outside shift windows")
+    spans = (start_shift != end_shift) & (events["state"] != "STOP")
+    if spans.any():
+        raise ValueError(f"{spans.sum()} non-STOP events span several shifts")
+
+
+def _shift_index(ts: pd.Series, closed: str) -> pd.Series:
+    """Label each timestamp with 'YYYY-MM-DD/shift', or NaN if outside shifts.
+
+    closed='left' matches [shift start, shift end), 'right' matches
+    (shift start, shift end], so an event ending at 14:00 belongs to shift A.
+    """
+    label = pd.Series(pd.NA, index=ts.index, dtype="object")
+    day = ts.dt.normalize()
+    for name, (shift_start, shift_end) in SHIFTS.items():
         lo = day + pd.Timedelta(hours=shift_start.hour, minutes=shift_start.minute)
         hi = day + pd.Timedelta(hours=shift_end.hour, minutes=shift_end.minute)
-        in_any_shift |= (events["start"] >= lo) & (events["end"] <= hi)
-    if not in_any_shift.all():
-        raise ValueError(f"{(~in_any_shift).sum()} events outside shift windows")
+        inside = (ts >= lo) & (ts < hi) if closed == "left" else (ts > lo) & (ts <= hi)
+        label[inside] = day[inside].dt.strftime("%Y-%m-%d") + "/" + name
+    return label
 
 
 def write_sample(out_dir: Path, seed: int = SEED) -> list[Path]:

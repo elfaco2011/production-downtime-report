@@ -33,13 +33,45 @@ def test_no_overlaps_and_within_shifts(data):
     synth.validate_events(data[0])  # raises on failure
 
 
+def _clip_to_shifts(events):
+    """Minutes of each event inside each shift window, keyed by shift."""
+    rows = []
+    for day in synth._working_days():
+        for name, (s, e) in synth.SHIFTS.items():
+            lo = pd.Timestamp.combine(day, s)
+            hi = pd.Timestamp.combine(day, e)
+            overlap = (
+                events["end"].clip(upper=hi) - events["start"].clip(lower=lo)
+            ) / pd.Timedelta(minutes=1)
+            part = events.assign(day=day, shift=name, minutes=overlap)
+            rows.append(part[part["minutes"] > 0])
+    return pd.concat(rows)
+
+
 def test_each_shift_fully_covered(data):
     events, _ = data
-    minutes = (events["end"] - events["start"]).dt.total_seconds() / 60
-    per_shift = minutes.groupby(
-        [events["machine"], events["start"].dt.date, events["start"].dt.hour < 14]
-    ).sum()
+    per_shift = _clip_to_shifts(events).groupby(["machine", "day", "shift"])[
+        "minutes"
+    ].sum()
+    assert len(per_shift) == 3 * 8 * 5 * 2
     assert (per_shift == synth.SHIFT_MIN).all()
+
+
+def test_some_long_stops_carry_over(data):
+    events, _ = data
+    stops = events[events["state"] == "STOP"]
+    start_shift = synth._shift_index(stops["start"], closed="left")
+    end_shift = synth._shift_index(stops["end"], closed="right")
+    crosses = start_shift != end_shift
+    long = (stops["end"] - stops["start"]) >= pd.Timedelta(minutes=30)
+    share = (crosses & long).sum() / long.sum()
+    assert 0.05 <= share <= 0.20
+    # Both kinds occur: into the next shift and into the next day.
+    next_day = stops["end"].dt.date != stops["start"].dt.date
+    assert (crosses & next_day).any()
+    assert (crosses & ~next_day).any()
+    # Never over a weekend.
+    assert ((stops["end"] - stops["start"]) < pd.Timedelta(hours=24)).all()
 
 
 def test_states_and_reasons(data):
