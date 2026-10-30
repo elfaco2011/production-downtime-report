@@ -12,6 +12,10 @@ SAMPLE = ROOT / "data" / "sample"
 MAPPING = ROOT / "config" / "mapping.example.yaml"
 
 HEADER = "machine,start,end,state,reason\n"
+ISO_HINT = (
+    " (expected YYYY-MM-DD HH:MM[:SS]; for other formats set "
+    "datetime_format in the mapping file)"
+)
 
 
 def csv(text: str) -> io.BytesIO:
@@ -66,9 +70,31 @@ def test_invalid_and_missing_dates_report_rows():
         + "M1,2026-09-01 06:20,,RUN,\n"
     )
     assert found == [
-        "row 3: invalid date/time 'not a date' in 'start'",
+        "row 3: invalid date/time 'not a date' in 'start'" + ISO_HINT,
         "row 4: missing date/time in 'end'",
     ]
+
+
+def test_non_iso_dates_are_rejected_not_guessed():
+    # Without a format, 01/09/2026 could be 1 September or 9 January.
+    found = problems(
+        HEADER
+        + "M1,2026-09-01 07:00,2026-09-01 06:50,STOP,x\n"
+        + "M1,01/09/2026 07:00,2026-09-01 08:00,RUN,\n"
+        + "M1,2026-09-01 08:00,2026-09-01 08:20,Alarm,\n"
+    )
+    assert found == [
+        "row 2: end (2026-09-01 06:50:00) is before start (2026-09-01 07:00:00)",
+        "row 3: invalid date/time '01/09/2026 07:00' in 'start'" + ISO_HINT,
+        found[2],
+    ]
+    assert found[2].startswith("unknown value(s) in 'state'")
+
+
+def test_dayfirst_option():
+    config = parse_config({"events": {"dayfirst": True}})
+    events = load_events(HEADER + "M1,01/09/2026 07:00,01/09/2026 08:00,RUN,\n", config)
+    assert events.at[0, "start"] == pd.Timestamp("2026-09-01 07:00")
 
 
 def test_end_before_start_reports_row():

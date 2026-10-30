@@ -36,13 +36,21 @@ class InputError(ValueError):
 
     def __init__(self, what: str, problems: list[str]):
         self.what = what
-        self.problems = problems
+        self.problems = sorted(problems, key=_row_of)
         listed = problems[:MAX_LISTED_PROBLEMS]
         lines = [f"{what}: {len(problems)} problem(s) found"]
         lines += [f"  - {p}" for p in listed]
         if len(problems) > len(listed):
             lines.append(f"  ... and {len(problems) - len(listed)} more")
         super().__init__("\n".join(lines))
+
+
+def _row_of(problem: str) -> float:
+    """Sort key: problems about a row by row number, general ones last."""
+    head = problem.split(":", 1)[0]
+    if head.startswith("row ") and head[4:].isdigit():
+        return int(head[4:])
+    return float("inf")
 
 
 @dataclass
@@ -286,14 +294,24 @@ def _parse_datetimes(
     fmt = fmt if fmt is not None else config.datetime_format
     text = _clean_text(s)
     blank = text == ""
-    # Excel cells arrive as datetimes already; text is parsed with the
-    # configured format, or element by element when none is given.
+    # Excel cells arrive as datetimes already. Text must be ISO 8601 unless
+    # the mapping sets a format or dayfirst: guessing would silently read
+    # 01/09/2026 as 9 January.
     values = s.astype(object).where(~blank, None)
     values = values.map(lambda v: v.strip() if isinstance(v, str) else v)
+    if fmt:
+        hint = f" (expected format {fmt})"
+    elif config.dayfirst:
+        fmt, hint = "mixed", " (expected day first, e.g. 31/08/2026 06:00)"
+    else:
+        fmt = "ISO8601"
+        hint = (
+            " (expected YYYY-MM-DD HH:MM[:SS]; for other formats set "
+            "datetime_format in the mapping file)"
+        )
     parsed = pd.to_datetime(
-        values, format=fmt or "mixed", dayfirst=config.dayfirst, errors="coerce"
+        values, format=fmt, dayfirst=config.dayfirst, errors="coerce"
     ).astype("datetime64[ns]")
-    hint = f" (expected format {fmt})" if fmt else ""
     for i in parsed.index[parsed.isna() & ~blank]:
         problems.append(
             f"row {rows[i]}: invalid date/time '{text[i]}' in '{column}'{hint}"
