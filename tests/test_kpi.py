@@ -356,3 +356,11 @@ M1,2026-09-01 10:21,2026-09-01 14:00,RUN,
         {"weekday": "Tuesday", "hour": 9, "minutes": 10.0},
         {"weekday": "Tuesday", "hour": 10, "minutes": 20.0},
     ]
+
+
+def test_stop_events_can_include_micro_stops(one_shift):
+    from pdr.kpi import stop_events
+
+    assert len(stop_events(one_shift)) == 2
+    events = stop_events(one_shift, include_micro=True)
+    assert events["micro"].tolist() == [False, False, True]

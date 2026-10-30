@@ -331,30 +331,44 @@ def micro_stops(analysis: Analysis, top: int = 5) -> dict:
     }
 
 
-def top_stops(analysis: Analysis, n: int = 10) -> pd.DataFrame:
-    """Longest unplanned stops, ranked by minutes inside shifts.
+def stop_events(analysis: Analysis, include_micro: bool = False) -> pd.DataFrame:
+    """Unplanned stops as whole events, longest first.
 
-    duration_min is the real duration from the original start to end,
-    including any time outside the shift calendar.
+    downtime_min counts minutes inside shifts; duration_min is the real
+    duration from the original start to end, including any time outside
+    the shift calendar.
     """
     s = analysis.segments
-    stops = s[(s["state"] == "STOP") & ~s["is_micro"]]
+    mask = s["state"] == "STOP"
+    if not include_micro:
+        mask &= ~s["is_micro"]
+    columns = [
+        "machine", "start", "end", "reason", "downtime_min", "duration_min",
+        "micro", "row",
+    ]
+    if not mask.any():
+        return pd.DataFrame(columns=columns)
     t = (
-        stops.groupby("event_id")
+        s[mask].groupby("event_id")
         .agg(
             machine=("machine", "first"),
             start=("event_start", "first"),
             end=("event_end", "first"),
             reason=("reason", "first"),
             downtime_min=("minutes", "sum"),
+            micro=("is_micro", "first"),
             row=("row", "first"),
         )
         .sort_values(["downtime_min", "start"], ascending=[False, True])
-        .head(n)
         .reset_index(drop=True)
     )
     t["duration_min"] = (t["end"] - t["start"]) / MINUTE
-    return t[["machine", "start", "end", "reason", "downtime_min", "duration_min", "row"]]
+    return t[columns]
+
+
+def top_stops(analysis: Analysis, n: int = 10) -> pd.DataFrame:
+    """The n longest unplanned stops, ranked by minutes inside shifts."""
+    return stop_events(analysis).head(n).drop(columns="micro")
 
 
 @dataclass
