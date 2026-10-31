@@ -153,16 +153,16 @@ Other conventions:
 
 ## Quick start
 
-Python 3.10 or newer.
+Python 3.11 (tested; 3.10 or newer should work).
 
 ```sh
 git clone git@github.com:elfaco2011/production-downtime-report.git
 cd production-downtime-report
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt && pip install -e .
+pip install -r requirements.txt
 
-# Dashboard
-streamlit run app.py
+# Dashboard (served on this computer only)
+streamlit run app.py --server.address localhost
 
 # Weekly report from the command line (PDF + Excel in output/)
 python -m pdr report --input data/sample/events.csv \
@@ -191,11 +191,13 @@ python -m pdr.synth --out data/sample
 - Performance needs the ideal cycle time on each production row. Values above
   100% are capped and flagged; this usually means the ideal cycle is set too high.
 - Micro-stops are identified by duration only, not by cause.
-- The dashboard analyses one set of files at a time, keeps nothing between
-  sessions and has no user accounts.
-- Out of the box the dashboard listens on this computer only (`localhost`, see
-  `.streamlit/config.toml`). To serve it on a network or in the cloud, change
-  `server.address`.
+- The dashboard analyses one set of files at a time and keeps nothing between
+  sessions.
+- The dashboard has no user accounts. Run locally with
+  `--server.address localhost` it is reachable from this computer only; a copy
+  deployed on Streamlit Community Cloud (choose Python 3.11) is reachable by
+  anyone with the link, so use it with sample or anonymised data. Uploaded
+  files are kept in memory for the session and never written to disk.
 
 ## Development
 
