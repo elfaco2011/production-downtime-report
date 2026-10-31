@@ -3,20 +3,32 @@
 Run with:  streamlit run app.py
 
 Uploaded files are processed in memory only; nothing is written to disk
-or sent anywhere.
+or sent anywhere. When an upload does not match the expected layout, the
+page asks the user to map columns, state labels and the date format
+(logic in pdr.mapping) instead of stopping with an error.
 """
 
 from __future__ import annotations
 
+import hashlib
 import io
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 import yaml
 
 from pdr import charts
-from pdr.config import ConfigError, parse_config
-from pdr.io import InputError, load_dataset
+from pdr.config import (
+    DATE_ORDERS,
+    EVENT_FIELDS,
+    PRODUCTION_FIELDS,
+    STATES,
+    Config,
+    ConfigError,
+    parse_config,
+)
+from pdr.io import InputError, RawTables, load_dataset, read_tables
 from pdr.kpi import (
     Analysis,
     analyze,
@@ -29,11 +41,34 @@ from pdr.kpi import (
     stop_events,
     summary,
 )
+from pdr.mapping import (
+    DATE_ORDER_LABELS,
+    build_mapping,
+    diagnose,
+    mapping_yaml,
+    preview_dates,
+    suggest_columns,
+    suggest_date_order,
+    suggest_state,
+    unknown_state_labels,
+)
 from pdr.report import build_weekly, render_excel, render_pdf, weeks
 
 SAMPLE = Path(__file__).parent / "data" / "sample"
+UPWORK_URL = "https://www.upwork.com/freelancers/~0113002181207316dd"
+CONTACT = (
+    "Need this configured for your plant's export? "
+    f"[Contact me on Upwork]({UPWORK_URL})."
+)
+FIELD_LABELS = {
+    "machine": "Machine", "start": "Start time", "end": "End time", "state": "State",
+    "reason": "Reason", "date": "Date", "shift": "Shift",
+    "ideal_cycle_s": "Ideal cycle time (s)", "good_parts": "Good parts",
+    "scrap_parts": "Scrap parts",
+}
 
-st.set_page_config(page_title="Production Downtime Report", page_icon="🏭", layout="wide")
+# (events, production, mapping YAML text); files as (bytes, name).
+Inputs = tuple[tuple[bytes, str], tuple[bytes, str] | None, str]
 
 
 # --- loading ---------------------------------------------------------------
@@ -45,12 +80,21 @@ def _named(data: bytes, name: str) -> io.BytesIO:
     return buf
 
 
+@st.cache_data(show_spinner="Reading files…")
+def read_raw(
+    events: tuple[bytes, str], production: tuple[bytes, str] | None, mapping_text: str
+) -> RawTables:
+    config = parse_config(yaml.safe_load(mapping_text) or {})
+    return read_tables(_named(*events), _named(*production) if production else None, config)
+
+
 @st.cache_data(show_spinner="Analysing…")
 def run_analysis(
     events: tuple[bytes, str],
     production: tuple[bytes, str] | None,
     mapping_text: str,
     micro_stops_as: str,
+    skip_invalid_rows: bool = False,
 ) -> Analysis:
     raw = (yaml.safe_load(mapping_text) if mapping_text else None) or {}
     raw = {**raw, "micro_stops_as": micro_stops_as}
@@ -59,11 +103,12 @@ def run_analysis(
         _named(*events),
         _named(*production) if production else None,
         config,
+        skip_invalid_rows=skip_invalid_rows,
     )
     return analyze(dataset)
 
 
-def demo_inputs():
+def demo_inputs() -> Inputs:
     return (
         ((SAMPLE / "events.csv").read_bytes(), "events.csv"),
         ((SAMPLE / "production.csv").read_bytes(), "production.csv"),
@@ -71,10 +116,11 @@ def demo_inputs():
     )
 
 
-def sidebar_inputs():
+def sidebar_inputs() -> Inputs | None:
     st.sidebar.header("Data")
     source = st.sidebar.radio(
-        "Source", ["Demo data", "Upload my own files"], label_visibility="collapsed"
+        "Source", ["Demo data", "Upload my own files"], label_visibility="collapsed",
+        key="source",
     )
     if source == "Demo data":
         st.sidebar.caption(
@@ -94,7 +140,8 @@ def sidebar_inputs():
     )
     mapping = st.sidebar.file_uploader(
         "Column mapping (YAML, optional)", type=["yaml", "yml"],
-        help="Maps your column names and state labels; see config/mapping.example.yaml.",
+        help="A mapping.yaml downloaded from this page, or see "
+        "config/mapping.example.yaml. Without one, the page asks.",
     )
     st.sidebar.caption("Files are processed in memory and never leave this app.")
     if events is None:
@@ -112,8 +159,165 @@ def show_input_error(exc: Exception) -> None:
         st.markdown("\n".join(f"- {p}" for p in exc.problems[:50]))
         if len(exc.problems) > 50:
             st.caption(f"… and {len(exc.problems) - 50} more.")
+    elif isinstance(exc, yaml.YAMLError):
+        st.error(f"**The mapping file is not valid YAML:** {exc}")
     else:
         st.error(f"**The mapping file is not valid:** {exc}")
+    st.markdown(CONTACT)
+
+
+# --- guided mapping ---------------------------------------------------------
+
+
+def _upload_key(inputs: Inputs) -> str:
+    """Identifies the uploaded files; answers are reset when they change."""
+    digest = hashlib.sha1()
+    for part in (inputs[0], inputs[1]):
+        if part:
+            digest.update(part[1].encode() + part[0])
+    digest.update(inputs[2].encode())
+    return digest.hexdigest()[:12]
+
+
+def _column_selects(
+    title: str, raw: pd.DataFrame, fields: tuple[str, ...], current: dict[str, str], key: str
+) -> dict[str, str | None]:
+    columns = [str(c).strip() for c in raw.columns]
+    suggested = suggest_columns(columns, fields)
+    st.markdown(f"**{title}**: which column holds…")
+    chosen = {}
+    cells = st.columns(len(fields))
+    for cell, f in zip(cells, fields):
+        default = current[f] if current[f] in columns else suggested[f]
+        chosen[f] = cell.selectbox(
+            FIELD_LABELS[f], columns,
+            index=columns.index(default) if default else None,
+            placeholder="Choose a column", key=f"{key}_{f}",
+        )
+    return chosen
+
+
+def mapping_panel(tables: RawTables, base: dict, current: Config, key: str) -> None:
+    st.subheader("Map your columns")
+    st.markdown(
+        "This file uses its own column names, state labels or date format. "
+        "Tell the dashboard what they mean; the most likely answers are already "
+        "selected. You can download the answers as a mapping file and upload it "
+        "next time."
+    )
+    reference = parse_config(base)
+    events = tables.events.rename(columns=lambda c: str(c).strip())
+    event_columns = _column_selects(
+        "Machine events", events, EVENT_FIELDS, current.event_columns, f"{key}_ev"
+    )
+    production_columns = None
+    if tables.production is not None:
+        production_columns = _column_selects(
+            "Production", tables.production, PRODUCTION_FIELDS,
+            current.production_columns, f"{key}_pr",
+        )
+
+    states: dict[str, str | None] = {}
+    if event_columns["state"]:
+        labels = unknown_state_labels(events[event_columns["state"]], reference)
+        if labels:
+            st.markdown("**Machine states**: what does each value mean?")
+            st.caption(
+                "RUN = producing · STOP = unplanned stop (alarm, fault, waiting) · "
+                "SETUP = changeover, mold change · PLANNED = break, planned maintenance, no orders"
+            )
+            cells = st.columns(4)
+            for i, label in enumerate(labels):
+                default = current.state_values.get(label.casefold()) or suggest_state(label)
+                states[label] = cells[i % 4].selectbox(
+                    f"“{label}”", STATES,
+                    index=STATES.index(default) if default else None,
+                    placeholder="Choose a state", key=f"{key}_state_{label}",
+                )
+
+    st.markdown("**Date format**")
+    start = events[event_columns["start"]] if event_columns["start"] else None
+    default_order = (
+        suggest_date_order(start, current.date_order) if start is not None
+        else current.date_order
+    )
+    left, right = st.columns([1, 2])
+    order = left.radio(
+        "Dates in the file", DATE_ORDERS, index=DATE_ORDERS.index(default_order),
+        format_func=DATE_ORDER_LABELS.get, key=f"{key}_dates",
+        help="Auto reads YYYY-MM-DD only. Pick the order your plant uses: "
+        "01/09/2026 is 1 September as DD/MM and 9 January as MM/DD.",
+    )
+    if start is not None:
+        right.dataframe(preview_dates(start, order), hide_index=True, width="stretch")
+
+    try:
+        answers, unanswered = build_mapping(
+            event_columns, production_columns, states, order, base
+        ), None
+    except ConfigError as exc:
+        answers, unanswered = None, str(exc)
+    if unanswered:
+        st.warning(f"Still to answer: {unanswered}")
+    apply_col, download_col, _ = st.columns([1, 1, 2])
+    if apply_col.button("Apply", type="primary", disabled=answers is None, width="stretch"):
+        st.session_state.update(guided=answers, skip_rows=False, edit_mapping=False)
+        st.rerun()
+    download_col.download_button(
+        "Download mapping.yaml",
+        data=mapping_yaml(answers) if answers else "",
+        file_name="mapping.yaml",
+        mime="application/x-yaml",
+        disabled=answers is None,
+        icon=":material/download:",
+        width="stretch",
+    )
+    st.caption(CONTACT)
+
+
+def row_errors_panel(exc: InputError) -> None:
+    n = exc.bad_rows
+    st.error(
+        f"**{n} {'row has' if n == 1 else 'rows have'} errors.** Fix them in the file "
+        "and upload it again, or analyse the other rows. Skipped rows are listed "
+        "under Data quality and in the PDF report."
+    )
+    st.dataframe(exc.table(), hide_index=True, width="stretch")
+    if st.button("Analyse anyway, skipping these rows", type="primary"):
+        st.session_state.skip_rows = True
+        st.rerun()
+    st.markdown(CONTACT)
+
+
+def load_uploaded(inputs: Inputs, micro_as: str) -> Analysis | None:
+    """Analysis of the uploaded files, or None while the page asks the user."""
+    state = st.session_state
+    key = _upload_key(inputs)
+    if state.get("upload_key") != key:
+        state.update(upload_key=key, guided=None, skip_rows=False, edit_mapping=False)
+    try:
+        base = (yaml.safe_load(inputs[2]) if inputs[2] else None) or {}
+        applied = state.guided if state.guided is not None else base
+        config = parse_config(applied)
+        mapping_text = yaml.safe_dump(applied, sort_keys=False, allow_unicode=True)
+        tables = read_raw(inputs[0], inputs[1], mapping_text)
+    except (InputError, ConfigError, yaml.YAMLError) as exc:
+        show_input_error(exc)
+        return None
+
+    if state.edit_mapping or diagnose(tables, config).any:
+        mapping_panel(tables, base, config, key)
+        return None
+    try:
+        return run_analysis(inputs[0], inputs[1], mapping_text, micro_as, state.skip_rows)
+    except InputError as exc:
+        if exc.rows_only and not state.skip_rows:
+            row_errors_panel(exc)
+        else:
+            show_input_error(exc)
+    except ConfigError as exc:
+        show_input_error(exc)
+    return None
 
 
 # --- page sections ----------------------------------------------------------
@@ -276,7 +480,17 @@ def sidebar_filters(a: Analysis) -> Analysis:
 # --- page -------------------------------------------------------------------
 
 
-def main() -> None:
+def main(inputs: Inputs | None = None) -> None:
+    """The page. inputs bypasses the sidebar uploads (used by the tests)."""
+    st.set_page_config(page_title="Production Downtime Report", page_icon="🏭", layout="wide")
+    try:
+        page(inputs)
+    finally:
+        st.sidebar.divider()
+        st.sidebar.caption(CONTACT)
+
+
+def page(inputs: Inputs | None) -> None:
     st.title("Production downtime & OEE")
     st.markdown(
         "Upload your machine event log to see **where production time is lost**: "
@@ -284,7 +498,9 @@ def main() -> None:
         "machine trends week by week."
     )
 
-    inputs = sidebar_inputs()
+    demo = inputs is None and st.session_state.get("source", "Demo data") == "Demo data"
+    if inputs is None:
+        inputs = sidebar_inputs()
     st.sidebar.header("Settings")
     micro_as = st.sidebar.radio(
         "Micro-stops count as a loss of",
@@ -295,14 +511,15 @@ def main() -> None:
     if inputs is None:
         st.info("Upload a machine event file in the sidebar, or switch to the demo data.")
         return
-    try:
+    if demo:
         analysis = run_analysis(*inputs, micro_as)
-    except (InputError, ConfigError) as exc:
-        show_input_error(exc)
-        return
-    except yaml.YAMLError as exc:
-        st.error(f"**The mapping file is not valid YAML:** {exc}")
-        return
+    else:
+        analysis = load_uploaded(inputs, micro_as)
+        if analysis is None:
+            return
+        if st.sidebar.button("Edit column mapping", icon=":material/table_edit:"):
+            st.session_state.edit_mapping = True
+            st.rerun()
 
     colors = charts.machine_colors(list(analysis.shifts["machine"].unique()))
     view = sidebar_filters(analysis)
@@ -322,4 +539,5 @@ def main() -> None:
     downloads_section(view, source=inputs[0][1])
 
 
-main()
+if __name__ == "__main__":
+    main()

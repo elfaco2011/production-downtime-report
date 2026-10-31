@@ -14,6 +14,7 @@ from pdr.mapping import (
     mapping_yaml,
     preview_dates,
     suggest_columns,
+    suggest_date_order,
     suggest_state,
     unknown_state_labels,
 )
@@ -177,3 +178,10 @@ def test_build_mapping_rejects_conflicting_labels():
             dict(zip(EVENT_FIELDS, ["Macchina", "Inizio", "Fine", "Stato", "Causa"])),
             None, {"Fermo": "STOP"}, "dmy", base,
         )
+
+
+def test_suggest_date_order_keeps_current_unless_another_reads_more():
+    one_bad = pd.Series(["2026-09-01 06:00", "01/09/2026 7h"])
+    assert suggest_date_order(one_bad, "iso") == "iso"
+    assert suggest_date_order(one_bad, "mdy") == "mdy"
+    assert suggest_date_order(pd.Series(["13/09/2026"]), "iso") == "dmy"

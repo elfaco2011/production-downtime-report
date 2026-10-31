@@ -190,6 +190,14 @@ def guess_date_order(values: pd.Series) -> str:
     return max(DATE_ORDERS, key=lambda order: counts[order])
 
 
+def suggest_date_order(values: pd.Series, current: str = "iso") -> str:
+    """Keep the current order unless another one reads more of the values."""
+    values = _date_values(values)
+    best = guess_date_order(values)
+    read = {o: int(parse_dates(values, o).notna().sum()) for o in (current, best)}
+    return best if read[best] > read[current] else current
+
+
 def preview_dates(values: pd.Series, order: str, n: int = 3) -> pd.DataFrame:
     """The first n distinct dates as written in the file and as they would be read.
 
@@ -253,11 +261,9 @@ def diagnose(tables: RawTables, config: Config) -> MappingNeeds:
             events[config.event_columns["state"]], config
         )
     if not config.datetime_format and "start" not in needs.missing_event_fields:
-        dates = events[config.event_columns["start"]]
-        current = int(parse_dates(_date_values(dates), config.date_order).notna().sum())
-        best = guess_date_order(dates)
-        if int(parse_dates(_date_values(dates), best).notna().sum()) > current:
-            needs.date_order = best
+        order = suggest_date_order(events[config.event_columns["start"]], config.date_order)
+        if order != config.date_order:
+            needs.date_order = order
     return needs
 
 
