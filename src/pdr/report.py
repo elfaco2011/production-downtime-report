@@ -181,6 +181,10 @@ def observations(report: WeeklyReport, current: Analysis) -> list[str]:
 # --- charts ------------------------------------------------------------------
 
 
+# Bars at least this tall (% of the axis) show their label inside.
+INSIDE_LABEL_MIN_PCT = 12
+
+
 def pareto_png(table: pd.DataFrame, width_in: float = 7.0, height_in: float = 2.4) -> bytes:
     """Pareto as PNG: share per cause (bars) and cumulative share (line), one axis."""
     fig, ax = plt.subplots(figsize=(width_in, height_in), dpi=200)
@@ -189,7 +193,14 @@ def pareto_png(table: pd.DataFrame, width_in: float = 7.0, height_in: float = 2.
     ax.bar(x, table["pct"], color=colors, width=0.7, zorder=2)
     ax.plot(x, table["cum_pct"], color=NEUTRAL, linewidth=2, marker="o", markersize=4, zorder=3)
     for i, (pct, minutes) in enumerate(zip(table["pct"], table["minutes"])):
-        ax.text(i, pct + 2, f"{minutes:,.0f}", ha="center", va="bottom", fontsize=7, color="#52514e")
+        # The cumulative marker sits on top of the first bar, so tall bars carry
+        # their label inside; short bars are far below the line.
+        if pct >= INSIDE_LABEL_MIN_PCT:
+            ax.text(i, pct - 2, f"{minutes:,.0f}", ha="center", va="top", fontsize=7,
+                    color="white", fontweight="bold", zorder=4)
+        else:
+            ax.text(i, pct + 2, f"{minutes:,.0f}", ha="center", va="bottom", fontsize=7,
+                    color="#52514e", zorder=4)
     ax.set_xticks(list(x))
     ax.set_xticklabels([_wrap(r) for r in table["reason"]], fontsize=7)
     ax.set_ylim(0, 105)
@@ -198,7 +209,7 @@ def pareto_png(table: pd.DataFrame, width_in: float = 7.0, height_in: float = 2.
     ax.grid(axis="y", color="#e5e4e0", linewidth=0.6, zorder=0)
     for side in ("top", "right", "left"):
         ax.spines[side].set_visible(False)
-    ax.set_title("Share of unplanned downtime (bars, minutes on top) and cumulative share (line)",
+    ax.set_title("Share of unplanned downtime (bars, labelled in minutes) and cumulative share (line)",
                  fontsize=8, loc="left", color="#52514e")
     fig.tight_layout()
     buf = io.BytesIO()
