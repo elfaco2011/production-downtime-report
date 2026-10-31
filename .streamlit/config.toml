@@ -11,3 +11,8 @@ primaryColor = "#2a78d6"
 
 [theme.sidebar]
 textColor = "#31333f"
+
+[server]
+# Upload limit in MB. The free Streamlit Cloud tier has little RAM; a very
+# large file would slow the shared demo down for everyone.
+maxUploadSize = 50
