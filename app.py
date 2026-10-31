@@ -432,7 +432,10 @@ def data_quality_section(a: Analysis) -> None:
             st.dataframe(dq.shifts_performance_over_1.round(3), hide_index=True)
         if not dq.dropped_rows.empty:
             st.markdown("**Rows not used**")
-            st.dataframe(dq.dropped_rows, hide_index=True)
+            st.dataframe(
+                dq.dropped_rows.rename(columns={"what": "file", "row": "Excel row"}),
+                hide_index=True,
+            )
         for note in a.notes:
             st.caption(note)
 

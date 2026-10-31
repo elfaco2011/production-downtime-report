@@ -199,15 +199,17 @@ def suggest_date_order(values: pd.Series, current: str = "iso") -> str:
 
 
 def preview_dates(values: pd.Series, order: str, n: int = 3) -> pd.DataFrame:
-    """The first n distinct dates as written in the file and as they would be read.
+    """Up to n dates from different days, as written in the file and as read.
 
-    Dates where day and month could be swapped are shown first, since those
-    are the ones that tell DD/MM from MM/DD.
+    Dates where day and month could be swapped (01/09) are shown first,
+    since those are the ones that tell DD/MM from MM/DD.
     """
-    values = _date_values(values).astype(object).drop_duplicates()
+    values = _date_values(values).astype(object)
     text = values.astype(str).str.strip()
-    numbers = text.str.extract(r"^(\d{1,2})[/.-](\d{1,2})[/.-]")
-    ambiguous = numbers.notna().all(axis=1) & (numbers[0] != numbers[1])
+    values = values[~text.str.split().str[0].duplicated()]
+    text = text[values.index]
+    numbers = text.str.extract(r"^(\d{1,2})[/.-](\d{1,2})[/.-]").astype(float)
+    ambiguous = (numbers <= 12).all(axis=1) & (numbers[0] != numbers[1])
     sample = pd.concat([values[ambiguous], values[~ambiguous]]).head(n)
     parsed = parse_dates(sample, order)
     return pd.DataFrame({

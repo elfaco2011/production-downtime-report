@@ -103,6 +103,14 @@ def test_preview_dates_shows_how_ambiguous_dates_are_read():
     assert mdy.at[0, "read as"] == "Fri 09 Jan 2026 07:30"
 
 
+def test_preview_dates_prefers_ambiguous_dates_from_different_days():
+    values = pd.Series(["31/08/2026 06:00", "31/08/2026 07:00", "01/09/2026 06:00",
+                        "13/09/2026 06:00", "02/09/2026 06:00"])
+    assert list(preview_dates(values, "dmy")["in the file"]) == [
+        "01/09/2026 06:00", "02/09/2026 06:00", "31/08/2026 06:00",
+    ]
+
+
 def test_diagnose_italian_file():
     tables = read_tables(named(ITALIAN_EVENTS, "eventi.csv"))
     needs = diagnose(tables, Config())
