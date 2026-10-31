@@ -31,8 +31,8 @@ also upload your own files. Nothing is stored: files are processed in memory.
 |---|---|
 | ![All losses Pareto, OEE trend and stop heatmap](docs/losses_heatmap.png) | ![Weekly PDF report](docs/weekly_report.png) |
 | Data quality checks, all-losses Pareto, weekly OEE per machine, stops by weekday and hour | One-page weekly PDF report |
-| ![Clear error messages](docs/input_errors.png) | |
-| File problems are listed with their row numbers | |
+| ![Guided column mapping](docs/input_errors.png) | ![Rows with errors](docs/row_errors.png) |
+| Your own export: map columns, state labels and date format with menus | Rows with errors listed by Excel row, with the option to skip them |
 
 ## What you get
 
@@ -51,6 +51,10 @@ also upload your own files. Nothing is stored: files are processed in memory.
   machine-days with no data, shifts with Performance above 100%, rows that could
   not be used. Time logged outside shift hours is shown for information: it is
   ignored by design.
+- **Guided mapping**: upload your own export as it is. If the column names,
+  state labels or date format differ, the dashboard asks with menus, already
+  filled in with the likely answers, and gives you the answers as a
+  `mapping.yaml` to reuse.
 - **Command line** for scheduled reports, using the same code as the dashboard.
 
 ## Use your own data
@@ -79,8 +83,15 @@ per part number).
 |---|---|---|---|---|---|
 | IMM-01 | 2026-09-01 | A | 24 | 861 | 10 |
 
-**Your own column names and labels are fine.** A short mapping file translates
-them. This is the mapping for the demo export with Italian headers
+**Your own column names and labels are fine.** In the dashboard, upload the
+file as it is: a "Map your columns" panel asks which column holds what, what
+each state label means ("Alarm", "Waiting" → STOP) and how dates are written
+(DD/MM/YYYY or MM/DD/YYYY, with a preview of how 01/09 will be read). Columns
+and labels with a familiar name are preselected, in English, Italian, German,
+Spanish and French. "Download mapping.yaml" saves the answers.
+
+The same mapping file works with the command line. This is the mapping for the
+demo export with Italian headers
 ([config/mapping.example.yaml](config/mapping.example.yaml)):
 
 ```yaml
@@ -92,7 +103,6 @@ events:
     STOP: Fermo
     SETUP: Attrezzaggio
     PLANNED: Pianificato
-  # datetime_format: "%d/%m/%Y %H:%M"   # if dates are not YYYY-MM-DD HH:MM[:SS]
 
 production:
   sheet: Produzione
@@ -104,14 +114,18 @@ shifts:
   B: {start: "14:00", end: "22:00"}
   # C: {start: "22:00", end: "06:00"}   # night shifts are supported
 
+date_order: dmy                # 31/08/2026; or mdy (08/31/2026), iso (default)
 micro_stop_minutes: 2
 micro_stops_as: performance    # or: availability
 unlogged_time: loss            # or: exclude
 ```
 
-If something in a file is wrong (missing column, unreadable date, end before
-start, overlapping events, a state label that is not mapped) you get the full
-list of problems with their row numbers, at once.
+If rows are wrong (unreadable or missing date, end before start, overlapping
+events, a bad number) you get the full list at once, with the row number as you
+see it in Excel (header = row 1). Fix the file, or click "Analyse anyway,
+skipping these rows": skipped rows are listed in the data quality panel and in
+the PDF report. State labels with no meaning are never skipped silently; they
+have to be mapped.
 
 ## KPI definitions
 
@@ -186,9 +200,12 @@ python -m pdr.synth --out data/sample
 - The same shift pattern applies to every machine and every day.
 - Timestamps are read as local plant time; time zones and daylight-saving
   changes are not handled.
-- Dates in text must be `YYYY-MM-DD HH:MM[:SS]` unless a format is set in the
-  mapping file. The tool does not guess, so 01/09 is never silently read as
-  9 January.
+- Dates in text are read as `YYYY-MM-DD HH:MM[:SS]` unless you choose
+  DD/MM/YYYY or MM/DD/YYYY (dashboard, or `date_order` in the mapping file).
+  The tool does not guess, so 01/09 is never silently read as 9 January.
+- Uploads are limited to 50 MB per file, to keep the shared online demo
+  responsive. Run it locally for larger files (`server.maxUploadSize` in
+  `.streamlit/config.toml`).
 - Performance needs the ideal cycle time on each production row. Values above
   100% are capped and flagged; this usually means the ideal cycle is set too high.
 - Micro-stops are identified by duration only, not by cause.

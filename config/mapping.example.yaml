@@ -34,7 +34,7 @@ shifts:                       # quote the times
   B: {start: "14:00", end: "22:00"}
   # C: {start: "22:00", end: "06:00"}   # a shift may end the next day
 
-date_order: iso              # or: dmy (31/08/2026), mdy (08/31/2026); ISO is always read
+date_order: iso               # or: dmy (31/08/2026), mdy (08/31/2026); ISO is always read
 micro_stop_minutes: 2         # unplanned stops shorter than this are micro-stops
 micro_stops_as: performance   # or: availability (which OEE factor they reduce)
 unlogged_time: loss           # or: exclude (shift minutes with no event logged)
