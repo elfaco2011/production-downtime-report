@@ -1,8 +1,9 @@
 """Load event and production logs from CSV or XLSX into canonical tables.
 
 All problems found in a file are collected and raised together as an
-InputError, each with the spreadsheet row number (header = row 1), so a
-user can fix the file in one pass.
+InputError, each with the row number the user sees when the file is
+opened in Excel (header = row 1, blank rows counted), so it can be fixed
+in one pass.
 
 Canonical events: machine, start, end, state, reason, reason_missing, row.
 - state is one of RUN / STOP / SETUP / PLANNED, mapped from the source
@@ -27,6 +28,7 @@ from .config import EVENT_FIELDS, PRODUCTION_FIELDS, STATES, Config
 
 UNSPECIFIED = "Unspecified"
 MAX_LISTED_PROBLEMS = 20
+ROW_PREFIX = "Excel row "
 
 Source = str | Path | BinaryIO
 
@@ -48,8 +50,8 @@ class InputError(ValueError):
 def _row_of(problem: str) -> float:
     """Sort key: problems about a row by row number, general ones last."""
     head = problem.split(":", 1)[0]
-    if head.startswith("row ") and head[4:].isdigit():
-        return int(head[4:])
+    if head.startswith(ROW_PREFIX) and head[len(ROW_PREFIX):].isdigit():
+        return int(head[len(ROW_PREFIX):])
     return float("inf")
 
 
@@ -134,7 +136,7 @@ def parse_events(
 
     machine = _clean_text(df["machine"])
     for i in machine.index[machine == ""]:
-        problems.append(f"row {rows[i]}: missing machine ('{columns['machine']}')")
+        problems.append(f"{ROW_PREFIX}{rows[i]}: missing machine ('{columns['machine']}')")
 
     start = _parse_datetimes(
         df["start"], config, rows, columns["start"], problems
@@ -143,7 +145,7 @@ def parse_events(
     reversed_ = start.notna() & end.notna() & (end < start)
     for i in reversed_.index[reversed_]:
         problems.append(
-            f"row {rows[i]}: end ({end[i]}) is before start ({start[i]})"
+            f"{ROW_PREFIX}{rows[i]}: end ({end[i]}) is before start ({start[i]})"
         )
 
     label = _clean_text(df["state"])
@@ -191,7 +193,7 @@ def parse_production(
 
     machine = _clean_text(df["machine"])
     for i in machine.index[machine == ""]:
-        problems.append(f"row {rows[i]}: missing machine ('{columns['machine']}')")
+        problems.append(f"{ROW_PREFIX}{rows[i]}: missing machine ('{columns['machine']}')")
 
     day = _parse_datetimes(
         df["date"], config, rows, columns["date"], problems, fmt=config.date_format
@@ -201,7 +203,7 @@ def parse_production(
     known = {s.name for s in config.shifts}
     for i in shift.index[~shift.isin(known)]:
         problems.append(
-            f"row {rows[i]}: unknown shift '{shift[i]}' in '{columns['shift']}'"
+            f"{ROW_PREFIX}{rows[i]}: unknown shift '{shift[i]}' in '{columns['shift']}'"
             f" (configured shifts: {', '.join(sorted(known))})"
         )
 
@@ -234,7 +236,12 @@ def _is_excel(source: Source) -> bool:
 
 def _read_csv(source: Source) -> pd.DataFrame:
     # Read as text so that parsing (and its error messages) stays in our hands.
-    return pd.read_csv(source, dtype=str, keep_default_na=False, sep=None, engine="python")
+    # Blank lines are kept so that row numbers match Excel; _select_columns
+    # drops them afterwards.
+    return pd.read_csv(
+        source, dtype=str, keep_default_na=False, sep=None, engine="python",
+        skip_blank_lines=False,
+    )
 
 
 def _read_workbook(source: Source) -> dict[str, pd.DataFrame]:
@@ -271,12 +278,16 @@ def _select_columns(
             f"columns in the file: {', '.join(map(str, raw.columns))}. "
             "Check the column names or the mapping file."
         ])
-    return pd.DataFrame({f: raw[columns[f]] for f in fields})
+    df = pd.DataFrame({f: raw[columns[f]] for f in fields}).reset_index(drop=True)
+    # Blank rows (e.g. a gap left in Excel) carry no data; the index keeps
+    # the original position, so row numbers of the other rows stay right.
+    blank = df.apply(lambda s: _clean_text(s) == "").all(axis=1)
+    return df[~blank]
 
 
 def _row_numbers(df: pd.DataFrame) -> pd.Series:
-    """Spreadsheet row of each record: header is row 1, data starts at 2."""
-    return pd.Series(range(2, len(df) + 2), index=df.index)
+    """Excel row of each record: header is row 1, data starts at row 2."""
+    return pd.Series(df.index + 2, index=df.index)
 
 
 def _clean_text(s: pd.Series) -> pd.Series:
@@ -314,10 +325,10 @@ def _parse_datetimes(
     ).astype("datetime64[ns]")
     for i in parsed.index[parsed.isna() & ~blank]:
         problems.append(
-            f"row {rows[i]}: invalid date/time '{text[i]}' in '{column}'{hint}"
+            f"{ROW_PREFIX}{rows[i]}: invalid date/time '{text[i]}' in '{column}'{hint}"
         )
     for i in blank.index[blank]:
-        problems.append(f"row {rows[i]}: missing date/time in '{column}'")
+        problems.append(f"{ROW_PREFIX}{rows[i]}: missing date/time in '{column}'")
     return parsed
 
 
@@ -329,7 +340,7 @@ def _parse_numbers(
     bad = values.isna() | (values <= 0 if positive else values < 0)
     rule = "a number > 0" if positive else "a number >= 0"
     for i in bad.index[bad]:
-        problems.append(f"row {rows[i]}: '{text[i]}' in '{column}' is not {rule}")
+        problems.append(f"{ROW_PREFIX}{rows[i]}: '{text[i]}' in '{column}' is not {rule}")
     return values.astype(float)
 
 
@@ -338,7 +349,7 @@ def _unknown_states_message(labels: pd.Series, rows: pd.Series, column: str) -> 
     for value, idx in labels.groupby(labels).groups.items():
         first = rows[idx].min()
         rows_word = "row" if len(idx) == 1 else "rows"
-        found.append(f"'{value}' ({len(idx)} {rows_word}, first at row {first})")
+        found.append(f"'{value}' ({len(idx)} {rows_word}, first at Excel row {first})")
     return (
         f"unknown value(s) in '{column}': {', '.join(found)}. "
         f"Each state must map to one of {', '.join(STATES)}; "
@@ -354,7 +365,7 @@ def _overlap_problems(events: pd.DataFrame) -> list[str]:
     overlap = events["start"] < previous_end
     for i in events.index[overlap]:
         problems.append(
-            f"row {events.at[i, 'row']}: overlaps row {int(previous_row[i])} "
+            f"{ROW_PREFIX}{events.at[i, 'row']}: overlaps Excel row {int(previous_row[i])} "
             f"on machine {events.at[i, 'machine']}"
         )
     return problems

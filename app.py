@@ -204,7 +204,7 @@ def stops_section(a: Analysis) -> None:
         events.rename(columns={
             "downtime_min": "minutes in shift",
             "duration_min": "real duration (min)",
-            "row": "file row",
+            "row": "Excel row",
         }).round({"minutes in shift": 1, "real duration (min)": 1}),
         hide_index=True, width="stretch", height=360,
     )

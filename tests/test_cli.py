@@ -35,6 +35,6 @@ def test_cli_reports_input_errors(tmp_path, capsys):
     bad.write_text("machine,start,end,state,reason\nM1,yesterday,2026-09-01 07:00,RUN,\n")
     assert main(["report", "--input", str(bad), "--output", str(tmp_path)]) == 2
     err = capsys.readouterr().err
-    assert "row 2: invalid date/time 'yesterday' in 'start'" in err
+    assert "Excel row 2: invalid date/time 'yesterday' in 'start'" in err
     assert main(["report", "--input", str(tmp_path / "missing.csv")]) == 2
     assert "file not found" in capsys.readouterr().err

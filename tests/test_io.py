@@ -70,8 +70,8 @@ def test_invalid_and_missing_dates_report_rows():
         + "M1,2026-09-01 06:20,,RUN,\n"
     )
     assert found == [
-        "row 3: invalid date/time 'not a date' in 'start'" + ISO_HINT,
-        "row 4: missing date/time in 'end'",
+        "Excel row 3: invalid date/time 'not a date' in 'start'" + ISO_HINT,
+        "Excel row 4: missing date/time in 'end'",
     ]
 
 
@@ -84,8 +84,8 @@ def test_non_iso_dates_are_rejected_not_guessed():
         + "M1,2026-09-01 08:00,2026-09-01 08:20,Alarm,\n"
     )
     assert found == [
-        "row 2: end (2026-09-01 06:50:00) is before start (2026-09-01 07:00:00)",
-        "row 3: invalid date/time '01/09/2026 07:00' in 'start'" + ISO_HINT,
+        "Excel row 2: end (2026-09-01 06:50:00) is before start (2026-09-01 07:00:00)",
+        "Excel row 3: invalid date/time '01/09/2026 07:00' in 'start'" + ISO_HINT,
         found[2],
     ]
     assert found[2].startswith("unknown value(s) in 'state'")
@@ -99,7 +99,40 @@ def test_error_message_lists_problems_in_row_order():
             + "M1,bad,2026-09-01 08:00,RUN,\n"
         )
     lines = str(exc.value).splitlines()
-    assert lines[1].startswith("  - row 2:") and lines[2].startswith("  - row 3:")
+    assert lines[1].startswith("  - Excel row 2:") and lines[2].startswith("  - Excel row 3:")
+
+
+BLANK_ROWS = [
+    ["machine", "start", "end", "state", "reason"],
+    ["M1", "2026-09-01 06:00", "2026-09-01 06:10", "RUN", None],
+    [None] * 5,  # a gap left in the sheet: Excel row 3
+    ["M1", "2026-09-01 06:10", "2026-09-01 06:05", "STOP", "x"],  # Excel row 4
+]
+
+
+def test_row_numbers_match_excel_in_csv_with_blank_lines():
+    text = "\n".join(",".join(c or "" for c in r) for r in BLANK_ROWS) + "\n"
+    text = text.replace("\n,,,,\n", "\n\n")  # a truly empty line, as Excel saves it
+    assert problems(text) == [
+        "Excel row 4: end (2026-09-01 06:05:00) is before start (2026-09-01 06:10:00)"
+    ]
+
+
+def test_row_numbers_match_excel_in_xlsx_with_blank_rows():
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    for r in BLANK_ROWS:
+        wb.active.append(r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    buf.name = "events.xlsx"
+    with pytest.raises(InputError) as exc:
+        load_dataset(buf)
+    assert exc.value.problems == [
+        "Excel row 4: end (2026-09-01 06:05:00) is before start (2026-09-01 06:10:00)"
+    ]
 
 
 def test_dayfirst_option():
@@ -111,7 +144,7 @@ def test_dayfirst_option():
 def test_end_before_start_reports_row():
     found = problems(HEADER + "M1,2026-09-01 07:00,2026-09-01 06:00,STOP,x\n")
     assert found == [
-        "row 2: end (2026-09-01 06:00:00) is before start (2026-09-01 07:00:00)"
+        "Excel row 2: end (2026-09-01 06:00:00) is before start (2026-09-01 07:00:00)"
     ]
 
 
@@ -122,7 +155,7 @@ def test_overlapping_events_report_rows():
         + "M1,2026-09-01 06:20,2026-09-01 06:40,STOP,x\n"
         + "M2,2026-09-01 06:20,2026-09-01 06:40,STOP,x\n"
     )
-    assert found == ["row 3: overlaps row 2 on machine M1"]
+    assert found == ["Excel row 3: overlaps Excel row 2 on machine M1"]
 
 
 def test_unmapped_state_values_are_listed():
@@ -133,8 +166,8 @@ def test_unmapped_state_values_are_listed():
         + "M1,2026-09-01 06:20,2026-09-01 06:30,Allarme,x\n"
     )
     assert len(found) == 1
-    assert "'Allarme' (2 rows, first at row 3)" in found[0]
-    assert "'Marcia' (1 row, first at row 2)" in found[0]
+    assert "'Allarme' (2 rows, first at Excel row 3)" in found[0]
+    assert "'Marcia' (1 row, first at Excel row 2)" in found[0]
     assert "events.state_values" in found[0]
 
 
@@ -156,7 +189,7 @@ def test_custom_datetime_format():
     assert events.at[0, "start"] == pd.Timestamp("2026-09-03 06:00")
     found = problems(HEADER + "M1,2026-09-03 06:00,03/09/2026 06:10,RUN,\n", config)
     assert found == [
-        "row 2: invalid date/time '2026-09-03 06:00' in 'start'"
+        "Excel row 2: invalid date/time '2026-09-03 06:00' in 'start'"
         " (expected format %d/%m/%Y %H:%M)"
     ]
 
@@ -171,10 +204,10 @@ def test_production_errors_report_rows(tmp_path):
     with pytest.raises(InputError) as exc:
         load_dataset(csv(HEADER + "M1,2026-09-01 06:00,2026-09-01 06:10,RUN,\n"), production)
     assert exc.value.problems == [
-        "row 3: unknown shift 'C' in 'shift' (configured shifts: A, B)",
-        "row 3: '0' in 'ideal_cycle_s' is not a number > 0",
-        "row 3: '-5' in 'good_parts' is not a number >= 0",
-        "row 3: 'x' in 'scrap_parts' is not a number >= 0",
+        "Excel row 3: unknown shift 'C' in 'shift' (configured shifts: A, B)",
+        "Excel row 3: '0' in 'ideal_cycle_s' is not a number > 0",
+        "Excel row 3: '-5' in 'good_parts' is not a number >= 0",
+        "Excel row 3: 'x' in 'scrap_parts' is not a number >= 0",
     ]
 
 
