@@ -282,6 +282,15 @@ def test_data_quality_rows(one_shift):
     assert rows.loc["Outside shift hours", "value"] == "0 min — ignored by design"
 
 
+def test_skipped_rows_are_listed_in_data_quality():
+    text = ONE_SHIFT + "M1,2026-09-01 13:00,2026-09-01 12:00,STOP,x\n"
+    dataset = load_dataset(_file(text, "events.csv"), skip_invalid_rows=True)
+    rows = data_quality(analyze(dataset)).rows().set_index("check")
+    n = len(ONE_SHIFT.splitlines()) + 1  # Excel row of the appended line
+    assert rows.loc["Rows dropped while loading", "value"] == f"1 (events: Excel row {n})"
+    assert rows.loc["Rows dropped while loading", "warning"]
+
+
 def test_unmatched_production_rows_are_reported():
     a = run(ONE_SHIFT, ONE_SHIFT_PRODUCTION + "M9,2026-09-01,A,30,1,0\n")
     assert data_quality(a).dropped_rows.to_dict("records") == [{

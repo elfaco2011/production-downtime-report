@@ -200,6 +200,73 @@ def test_overlapping_events_report_rows():
     assert found == ["Excel row 3: overlaps Excel row 2 on machine M1"]
 
 
+BAD_ROWS = (
+    HEADER
+    + "M1,2026-09-01 06:00,2026-09-01 08:00,RUN,\n"           # 2 kept
+    + "M1,2026-09-01 06:30,2026-09-01 06:45,STOP,x\n"         # 3 overlaps 2
+    + "M1,2026-09-01 07:00,2026-09-01 07:30,STOP,x\n"         # 4 overlaps 2, not 3
+    + "M1,2026-09-01 08:00,,STOP,x\n"                         # 5 missing end
+    + "M1,2026-09-01 08:30,2026-09-01 08:20,STOP,x\n"         # 6 end before start
+    + "M1,2026-09-01 09:00,2026-09-01 10:00,RUN,\n"           # 7 kept
+)
+
+
+def test_invalid_rows_are_listed_with_column():
+    with pytest.raises(InputError) as exc:
+        load_events(BAD_ROWS)
+    assert exc.value.rows_only and exc.value.bad_rows == 4
+    table = exc.value.table()
+    assert list(table.columns) == ["file", "Excel row", "column", "problem"]
+    assert table[["Excel row", "column"]].values.tolist() == [
+        [3, "start"], [4, "start"], [5, "end"], [6, "end"],
+    ]
+    assert table.at[0, "problem"] == "overlaps Excel row 2 on machine M1"
+    # Overlaps are checked among valid rows only: row 4 overlaps row 2, not row 3.
+    assert table.at[1, "problem"] == "overlaps Excel row 2 on machine M1"
+
+
+def test_skip_invalid_rows():
+    dataset = load_dataset(csv(BAD_ROWS), skip_invalid_rows=True)
+    assert list(dataset.events["row"]) == [2, 7]
+    assert dataset.dropped_rows.to_dict("records") == [
+        {"what": "events", "row": 3, "reason": "overlaps Excel row 2 on machine M1"},
+        {"what": "events", "row": 4, "reason": "overlaps Excel row 2 on machine M1"},
+        {"what": "events", "row": 5, "reason": "missing date/time in 'end'"},
+        {"what": "events", "row": 6, "reason":
+            "end (2026-09-01 08:20:00) is before start (2026-09-01 08:30:00)"},
+    ]
+
+
+def test_unmapped_states_are_never_skipped():
+    text = HEADER + "M1,2026-09-01 06:00,2026-09-01 06:10,Alarm,\n"
+    with pytest.raises(InputError) as exc:
+        load_dataset(csv(text), skip_invalid_rows=True)
+    assert not exc.value.rows_only
+    assert exc.value.issues[0].column == "state" and exc.value.issues[0].row is None
+
+
+def test_events_and_production_problems_are_reported_together(tmp_path):
+    production = tmp_path / "production.csv"
+    production.write_text(
+        "machine,date,shift,ideal_cycle_s,good_parts,scrap_parts\n"
+        "M1,2026-09-01,A,30,700,x\n"
+    )
+    with pytest.raises(InputError) as exc:
+        load_dataset(csv(HEADER + "M1,2026-09-01 07:00,2026-09-01 06:00,STOP,x\n"), production)
+    assert exc.value.what == "events and production"
+    assert [(p.what, p.row) for p in exc.value.issues] == [("events", 2), ("production", 2)]
+    assert str(exc.value).splitlines()[0] == "events: 1 problem(s) found"
+    dataset = load_dataset(
+        csv(HEADER + "M1,2026-09-01 07:00,2026-09-01 06:00,STOP,x\n"
+            + "M1,2026-09-01 06:00,2026-09-01 06:10,RUN,\n"),
+        production, skip_invalid_rows=True,
+    )
+    assert dataset.production.empty
+    assert dataset.dropped_rows[["what", "row"]].values.tolist() == [
+        ["events", 2], ["production", 2],
+    ]
+
+
 def test_unmapped_state_values_are_listed():
     found = problems(
         HEADER

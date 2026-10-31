@@ -390,6 +390,17 @@ class DataQuality:
     def unlogged_pct(self) -> float:
         return 100 * self.unlogged_min / self.shift_min if self.shift_min else 0.0
 
+    def _dropped_summary(self, limit: int = 8) -> str:
+        """Count, plus the Excel rows per table, e.g. "3 (events: Excel rows 4, 6, 9)"."""
+        if self.dropped_rows.empty:
+            return "0"
+        parts = []
+        for what, part in self.dropped_rows.groupby("what", sort=False):
+            rows = sorted(part["row"].astype(int).unique())
+            listed = ", ".join(map(str, rows[:limit])) + (", ..." if len(rows) > limit else "")
+            parts.append(f"{what}: Excel row{'s' if len(rows) > 1 else ''} {listed}")
+        return f"{len(self.dropped_rows)} ({'; '.join(parts)})"
+
     def rows(self) -> pd.DataFrame:
         """One line per check, for display in the dashboard and the PDF.
 
@@ -411,7 +422,7 @@ class DataQuality:
             ("Shifts with Performance > 100% (capped)",
              str(len(self.shifts_performance_over_1)),
              not self.shifts_performance_over_1.empty),
-            ("Rows dropped while loading", str(len(self.dropped_rows)),
+            ("Rows dropped while loading", self._dropped_summary(),
              not self.dropped_rows.empty),
         ]
         rows = [(c, v, "warning" if w else "ok") for c, v, w in checks]
