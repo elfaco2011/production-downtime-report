@@ -196,7 +196,7 @@ def pareto_png(table: pd.DataFrame, width_in: float = 7.0, height_in: float = 2.
         # The cumulative marker sits on top of the first bar, so tall bars carry
         # their label inside; short bars are far below the line.
         if pct >= INSIDE_LABEL_MIN_PCT:
-            ax.text(i, pct - 2, f"{minutes:,.0f}", ha="center", va="top", fontsize=7,
+            ax.text(i, pct - 5, f"{minutes:,.0f}", ha="center", va="top", fontsize=7,
                     color="white", fontweight="bold", zorder=4)
         else:
             ax.text(i, pct + 2, f"{minutes:,.0f}", ha="center", va="bottom", fontsize=7,
