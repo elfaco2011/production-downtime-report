@@ -243,7 +243,8 @@ def _num(v, unit: str = "", digits: int = 0) -> str:
 
 def _latin1(text: str) -> str:
     """Core PDF fonts are Latin-1; replace anything else instead of failing."""
-    return str(text).encode("latin-1", "replace").decode("latin-1")
+    text = str(text).replace("\u2014", "-").replace("\u2013", "-")
+    return text.encode("latin-1", "replace").decode("latin-1")
 
 
 class _PDF(FPDF):
@@ -352,7 +353,7 @@ def render_pdf(report: WeeklyReport, source: str = "") -> bytes:
     _heading(pdf, "Data quality")
     pdf.set_font("Helvetica", size=8)
     items = [
-        f"[{'check' if r.warning else 'ok'}]  {r.check}: {r.value}"
+        f"[{'check' if r.status == 'warning' else r.status}]  {r.check}: {r.value}"
         for r in report.data_quality.itertuples()
     ]
     half = (len(items) + 1) // 2
@@ -448,7 +449,7 @@ def render_excel(analysis: Analysis) -> bytes:
                                         "mtbf_min", "mttr_min"]],
         "Micro-stops": micro["top_causes"],
         "Stops": stop_events(analysis, include_micro=True),
-        "Data quality": dq.rows(),
+        "Data quality": dq.rows().drop(columns="warning"),
         "Settings": pd.DataFrame([
             ("micro_stop_minutes", analysis.config.micro_stop_min),
             ("micro_stops_as", analysis.config.micro_stops_as),

@@ -47,9 +47,10 @@ also upload your own files. Nothing is stored: files are processed in memory.
   *"IMM-02: mold temperature alarm = 57% of unplanned downtime (328 min)."*
 - **Excel workbook** with one sheet per KPI view: by machine, week, day and shift,
   both Pareto views, MTBF/MTTR, micro-stops, every stop, data quality, settings.
-- **Data quality checks**: stops without reason code, unlogged shift time, time
-  outside shifts, machine-days with no data, shifts with Performance above 100%,
-  rows that could not be used.
+- **Data quality checks**: stops without reason code, unlogged shift time,
+  machine-days with no data, shifts with Performance above 100%, rows that could
+  not be used. Time logged outside shift hours is shown for information: it is
+  ignored by design.
 - **Command line** for scheduled reports, using the same code as the dashboard.
 
 ## Use your own data

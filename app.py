@@ -216,7 +216,9 @@ def data_quality_section(a: Analysis) -> None:
     rows = dq.rows()
     warnings = int(rows["warning"].sum())
     with st.expander(f"Data quality · {warnings} item(s) to check", expanded=False):
-        shown = rows.assign(status=rows["warning"].map({True: "⚠️ check", False: "✅ ok"}))
+        shown = rows.assign(
+            status=rows["status"].map({"warning": "⚠️ check", "ok": "✅ ok", "info": "ℹ️ info"})
+        )
         st.dataframe(shown[["status", "check", "value"]], hide_index=True, width="stretch")
         if not dq.machine_days_without_events.empty:
             st.markdown("**Machine-days without events** (not counted in KPIs)")

@@ -276,6 +276,10 @@ def test_data_quality_rows(one_shift):
     assert rows.loc["Stops without reason code", "value"] == "1 of 3 (33.3%)"
     assert rows.loc["Stops without reason code", "warning"]
     assert not rows.loc["Rows dropped while loading", "warning"]
+    # Time outside shift hours is information, never a warning.
+    assert rows.loc["Outside shift hours", "status"] == "info"
+    assert not rows.loc["Outside shift hours", "warning"]
+    assert rows.loc["Outside shift hours", "value"] == "0 min — ignored by design"
 
 
 def test_unmatched_production_rows_are_reported():

@@ -391,7 +391,12 @@ class DataQuality:
         return 100 * self.unlogged_min / self.shift_min if self.shift_min else 0.0
 
     def rows(self) -> pd.DataFrame:
-        """One line per check, for display in the dashboard and the PDF."""
+        """One line per check, for display in the dashboard and the PDF.
+
+        status is "warning" or "ok" for checks that can point to bad data,
+        and "info" for facts that are expected by design: time logged
+        outside shift hours is simply not part of the analysis.
+        """
         checks = [
             ("Stops without reason code",
              f"{self.stops_without_reason} of {self.stops_total} "
@@ -400,8 +405,6 @@ class DataQuality:
             ("Unlogged shift time",
              f"{self.unlogged_min:,.0f} min ({self.unlogged_pct:.1f}% of shift time)",
              self.unlogged_min > 0),
-            ("Logged time outside shifts (ignored)",
-             f"{self.outside_shift_min:,.0f} min", self.outside_shift_min > 0),
             ("Machine-days without events",
              str(len(self.machine_days_without_events)),
              not self.machine_days_without_events.empty),
@@ -411,7 +414,12 @@ class DataQuality:
             ("Rows dropped while loading", str(len(self.dropped_rows)),
              not self.dropped_rows.empty),
         ]
-        return pd.DataFrame(checks, columns=["check", "value", "warning"])
+        rows = [(c, v, "warning" if w else "ok") for c, v, w in checks]
+        rows.append(("Outside shift hours",
+                     f"{self.outside_shift_min:,.0f} min — ignored by design", "info"))
+        table = pd.DataFrame(rows, columns=["check", "value", "status"])
+        table["warning"] = table["status"] == "warning"
+        return table
 
 
 def data_quality(analysis: Analysis) -> DataQuality:
