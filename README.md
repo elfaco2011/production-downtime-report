@@ -22,8 +22,9 @@ with the same definitions every week.
 
 ## Live demo
 
-**[Open the live demo](#)** *(link coming soon)*. It runs on demo data; you can
-also upload your own files. Nothing is stored: files are processed in memory.
+**[downtime-oee-report.streamlit.app](https://downtime-oee-report.streamlit.app)**:
+it opens on synthetic demo data, and you can upload your own CSV/Excel export to
+analyse it. Nothing is stored: files are processed in memory.
 
 ## Screenshots
 
