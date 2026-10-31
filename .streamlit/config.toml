@@ -1,2 +1,13 @@
 [browser]
 gatherUsageStats = false
+
+[client]
+# Viewers see the app, not the Deploy button and developer menu.
+toolbarMode = "viewer"
+
+[theme]
+base = "light"
+primaryColor = "#2a78d6"
+
+[theme.sidebar]
+textColor = "#31333f"
