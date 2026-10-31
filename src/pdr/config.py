@@ -21,6 +21,9 @@ PRODUCTION_FIELDS = (
     "machine", "date", "shift", "ideal_cycle_s", "good_parts", "scrap_parts",
 )
 MICRO_STOPS_AS = ("performance", "availability")
+# How text dates are read: ISO only (YYYY-MM-DD), or ISO plus day-first
+# (31/08/2026) or month-first (08/31/2026) dates.
+DATE_ORDERS = ("iso", "dmy", "mdy")
 UNLOGGED_TIME = ("loss", "exclude")
 
 
@@ -69,7 +72,7 @@ class Config:
     production_sheet: str | None = None
     datetime_format: str | None = None
     date_format: str | None = None
-    dayfirst: bool = False
+    date_order: str = "iso"
     shifts: tuple[Shift, ...] = DEFAULT_SHIFTS
     micro_stop_min: float = 2.0
     # Which OEE factor micro-stops reduce (see kpi module docstring).
@@ -99,14 +102,14 @@ def parse_config(raw: dict) -> Config:
     _check_keys(
         raw,
         {"events", "production", "shifts", "micro_stop_minutes", "micro_stops_as",
-         "unlogged_time"},
+         "unlogged_time", "date_order"},
         "top level",
     )
     events = raw.get("events") or {}
     production = raw.get("production") or {}
     _check_keys(
         events,
-        {"sheet", "columns", "state_values", "datetime_format", "dayfirst"},
+        {"sheet", "columns", "state_values", "datetime_format"},
         "events",
     )
     _check_keys(production, {"sheet", "columns", "date_format"}, "production")
@@ -121,7 +124,6 @@ def parse_config(raw: dict) -> Config:
         "production_sheet": production.get("sheet"),
         "datetime_format": events.get("datetime_format"),
         "date_format": production.get("date_format"),
-        "dayfirst": bool(events.get("dayfirst", False)),
     }
     if "shifts" in raw:
         kwargs["shifts"] = _shifts(raw["shifts"])
@@ -130,7 +132,11 @@ def parse_config(raw: dict) -> Config:
         if not isinstance(value, (int, float)) or value < 0:
             raise ConfigError("micro_stop_minutes must be a number >= 0")
         kwargs["micro_stop_min"] = float(value)
-    for key, allowed in [("micro_stops_as", MICRO_STOPS_AS), ("unlogged_time", UNLOGGED_TIME)]:
+    for key, allowed in [
+        ("micro_stops_as", MICRO_STOPS_AS),
+        ("unlogged_time", UNLOGGED_TIME),
+        ("date_order", DATE_ORDERS),
+    ]:
         if key in raw:
             if raw[key] not in allowed:
                 raise ConfigError(f"{key} must be one of: {', '.join(allowed)}")

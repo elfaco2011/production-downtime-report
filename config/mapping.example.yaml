@@ -16,8 +16,7 @@ events:
     STOP: Fermo
     SETUP: Attrezzaggio       # e.g. mold change: counts as lost availability
     PLANNED: Pianificato      # breaks, preventive maintenance: not scheduled time
-  # datetime_format: "%d/%m/%Y %H:%M"   # default: detected automatically
-  # dayfirst: true                       # for 03/09/2026 = 3 September
+  # datetime_format: "%d/%m/%Y %H:%M"   # an exact format overrides date_order
 
 production:
   sheet: Produzione           # default: second sheet of the workbook
@@ -35,6 +34,7 @@ shifts:                       # quote the times
   B: {start: "14:00", end: "22:00"}
   # C: {start: "22:00", end: "06:00"}   # a shift may end the next day
 
+date_order: iso              # or: dmy (31/08/2026), mdy (08/31/2026); ISO is always read
 micro_stop_minutes: 2         # unplanned stops shorter than this are micro-stops
 micro_stops_as: performance   # or: availability (which OEE factor they reduce)
 unlogged_time: loss           # or: exclude (shift minutes with no event logged)

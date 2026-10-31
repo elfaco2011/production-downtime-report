@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+import yaml
 
 from pdr.config import Config, ConfigError, load_config, parse_config
 from pdr.io import UNSPECIFIED, InputError, load_dataset
@@ -13,9 +14,13 @@ MAPPING = ROOT / "config" / "mapping.example.yaml"
 
 HEADER = "machine,start,end,state,reason\n"
 ISO_HINT = (
-    " (expected YYYY-MM-DD HH:MM[:SS]; for other formats set "
-    "datetime_format in the mapping file)"
+    " (expected YYYY-MM-DD HH:MM[:SS]; for other formats choose the "
+    "date format or set date_order in the mapping file)"
 )
+
+
+def yaml_of(path: Path) -> dict:
+    return yaml.safe_load(path.read_text())
 
 
 def csv(text: str) -> io.BytesIO:
@@ -135,10 +140,47 @@ def test_row_numbers_match_excel_in_xlsx_with_blank_rows():
     ]
 
 
-def test_dayfirst_option():
-    config = parse_config({"events": {"dayfirst": True}})
-    events = load_events(HEADER + "M1,01/09/2026 07:00,01/09/2026 08:00,RUN,\n", config)
-    assert events.at[0, "start"] == pd.Timestamp("2026-09-01 07:00")
+@pytest.mark.parametrize("order, expected", [
+    ("dmy", "2026-09-01 07:00"), ("mdy", "2026-01-09 07:00"),
+])
+def test_date_order(order, expected):
+    config = parse_config({"date_order": order})
+    events = load_events(
+        HEADER
+        + "M1,01/09/2026 07:00,01/09/2026 08:00:30,RUN,\n"
+        + "M2,2026-09-01 07:00,2026-09-01 08:00,RUN,\n",  # ISO is always accepted
+        config,
+    )
+    assert events.at[0, "start"] == pd.Timestamp(expected)
+    assert events.at[1, "start"] == pd.Timestamp("2026-09-01 07:00")
+
+
+def test_date_order_is_strict():
+    # Neither guessed nor partly read: "7h" is not a time.
+    found = problems(HEADER + "M1,01/09/2026 7h,2026-09-01 08:00,RUN,\n",
+                     parse_config({"date_order": "dmy"}))
+    assert found == [
+        "Excel row 2: invalid date/time '01/09/2026 7h' in 'start'"
+        " (expected DD/MM/YYYY HH:MM[:SS] or YYYY-MM-DD HH:MM[:SS])"
+    ]
+
+
+def test_date_order_applies_to_production_and_excel_cells(tmp_path):
+    config = parse_config({"date_order": "dmy"})
+    production = tmp_path / "production.csv"
+    production.write_text(
+        "machine,date,shift,ideal_cycle_s,good_parts,scrap_parts\n"
+        "M1,01/09/2026,A,30,700,20\n"
+    )
+    dataset = load_dataset(
+        csv(HEADER + "M1,01/09/2026 06:00,01/09/2026 06:10,RUN,\n"), production, config
+    )
+    assert dataset.production.at[0, "date"] == pd.Timestamp("2026-09-01")
+    mapped = load_config(MAPPING)
+    xlsx = load_dataset(SAMPLE / "plant_export.xlsx",
+                        config=parse_config({**yaml_of(MAPPING), "date_order": "dmy"}))
+    pd.testing.assert_frame_equal(xlsx.events, load_dataset(
+        SAMPLE / "plant_export.xlsx", config=mapped).events)
 
 
 def test_end_before_start_reports_row():

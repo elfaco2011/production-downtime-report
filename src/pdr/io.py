@@ -294,6 +294,46 @@ def _clean_text(s: pd.Series) -> pd.Series:
     return s.astype(object).where(s.notna(), "").astype(str).str.strip()
 
 
+DATE_HINTS = {
+    "iso": " (expected YYYY-MM-DD HH:MM[:SS]; for other formats choose the "
+           "date format or set date_order in the mapping file)",
+    "dmy": " (expected DD/MM/YYYY HH:MM[:SS] or YYYY-MM-DD HH:MM[:SS])",
+    "mdy": " (expected MM/DD/YYYY HH:MM[:SS] or YYYY-MM-DD HH:MM[:SS])",
+}
+
+
+def _order_formats(order: str) -> list[str]:
+    """Explicit formats tried after ISO for a day- or month-first order."""
+    day_month = "%d{0}%m{0}%Y" if order == "dmy" else "%m{0}%d{0}%Y"
+    return [
+        day_month.format(sep) + time
+        for sep in "/-."
+        for time in ("", " %H:%M", " %H:%M:%S")
+    ]
+
+
+def parse_dates(values: pd.Series, order: str = "iso", fmt: str | None = None) -> pd.Series:
+    """Parse dates strictly: unreadable values become NaT, nothing is guessed.
+
+    Values may be text or datetimes (Excel cells). ISO 8601 is always
+    accepted; "dmy" / "mdy" also accept 31/08/2026 / 08/31/2026 with an
+    optional HH:MM[:SS] time and / - . as separators. An explicit strftime
+    format replaces all of this.
+    """
+    values = values.astype(object).map(lambda v: v.strip() if isinstance(v, str) else v)
+    if fmt:
+        return pd.to_datetime(values, format=fmt, errors="coerce").astype("datetime64[ns]")
+    parsed = pd.to_datetime(values, format="ISO8601", errors="coerce").astype("datetime64[ns]")
+    if order != "iso":
+        for f in _order_formats(order):
+            if not parsed.isna().any():
+                break
+            parsed = parsed.fillna(
+                pd.to_datetime(values, format=f, errors="coerce").astype("datetime64[ns]")
+            )
+    return parsed
+
+
 def _parse_datetimes(
     s: pd.Series,
     config: Config,
@@ -306,23 +346,11 @@ def _parse_datetimes(
     text = _clean_text(s)
     blank = text == ""
     # Excel cells arrive as datetimes already. Text must be ISO 8601 unless
-    # the mapping sets a format or dayfirst: guessing would silently read
-    # 01/09/2026 as 9 January.
+    # the mapping sets a format or a date order: guessing would silently
+    # read 01/09/2026 as 9 January.
     values = s.astype(object).where(~blank, None)
-    values = values.map(lambda v: v.strip() if isinstance(v, str) else v)
-    if fmt:
-        hint = f" (expected format {fmt})"
-    elif config.dayfirst:
-        fmt, hint = "mixed", " (expected day first, e.g. 31/08/2026 06:00)"
-    else:
-        fmt = "ISO8601"
-        hint = (
-            " (expected YYYY-MM-DD HH:MM[:SS]; for other formats set "
-            "datetime_format in the mapping file)"
-        )
-    parsed = pd.to_datetime(
-        values, format=fmt, dayfirst=config.dayfirst, errors="coerce"
-    ).astype("datetime64[ns]")
+    hint = f" (expected format {fmt})" if fmt else DATE_HINTS[config.date_order]
+    parsed = parse_dates(values, config.date_order, fmt)
     for i in parsed.index[parsed.isna() & ~blank]:
         problems.append(
             f"{ROW_PREFIX}{rows[i]}: invalid date/time '{text[i]}' in '{column}'{hint}"
